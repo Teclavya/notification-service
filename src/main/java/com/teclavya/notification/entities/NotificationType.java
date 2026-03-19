@@ -1,0 +1,14 @@
+package com.teclavya.notification.entities;
+
+public enum NotificationType {
+    STREAK_AT_RISK,
+    DAILY_CHALLENGE_AVAILABLE,
+    REVIEW_ITEMS_DUE,
+    LEAGUE_POSITION_CHANGE,
+    FRIEND_ACTIVITY,
+    GOAL_COMPLETED,
+    WEEKLY_SUMMARY,
+    COMEBACK_INCENTIVE,
+    ACHIEVEMENT_UNLOCKED,
+    GENERAL
+}

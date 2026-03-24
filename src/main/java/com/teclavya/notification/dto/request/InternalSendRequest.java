@@ -6,7 +6,9 @@ import lombok.*;
 import java.util.Map;
 
 @Getter @Setter @Builder @AllArgsConstructor @NoArgsConstructor
-public class SendNotificationRequest {
+public class InternalSendRequest {
+    @NotBlank
+    private String sourceService;   // e.g. "cohorts", "mentor"
     @NotBlank
     private String studentId;
     @NotNull
@@ -15,5 +17,5 @@ public class SendNotificationRequest {
     private String title;
     private String body;
     private Map<String, Object> metadata;
-    private String actionUrl;   // NEW
+    private String actionUrl;
 }

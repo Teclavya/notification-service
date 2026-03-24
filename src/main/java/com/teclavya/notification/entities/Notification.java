@@ -28,6 +28,8 @@ public class Notification {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metadata;
+    @Column(length = 500)
+    private String actionUrl;   // NEW
     @Builder.Default
     private boolean isRead = false;
     @Builder.Default

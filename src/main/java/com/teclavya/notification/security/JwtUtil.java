@@ -1,12 +1,14 @@
 package com.teclavya.notification.security;
 
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import javax.crypto.SecretKey;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.SecretKey;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
 
 @Component
 public class JwtUtil {
@@ -14,9 +16,13 @@ public class JwtUtil {
     private String secret;
 
     public Claims extractAllClaims(String token) {
-        SecretKey key = Keys.hmacShaKeyFor(hexStringToByteArray(secret));
-        return Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody();
-    }
+    SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(secret));
+    return Jwts.parserBuilder()
+            .setSigningKey(key)
+            .build()
+            .parseClaimsJws(token)
+            .getBody();
+}
 
     public String extractUserId(String token) {
         return extractAllClaims(token).getSubject();

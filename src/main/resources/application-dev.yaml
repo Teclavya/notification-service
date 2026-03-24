@@ -10,6 +10,14 @@ spring:
     hikari:
       maximum-pool-size: 10
       minimum-idle: 3
+  data:
+    redis:
+      host: ${REDIS_HOST:redis-19481.c258.us-east-1-4.ec2.cloud.redislabs.com}
+      port: ${REDIS_PORT:19481}
+      password: ${REDIS_PASSWORD:GW5JBtzWFAww8Mh99vswE7F7kGbvSXs5}
+      ssl:
+        enabled: false
+
   jpa:
     hibernate:
       ddl-auto: validate

@@ -12,6 +12,7 @@ public class NotificationDto {
     private String title;
     private String body;
     private Map<String, Object> metadata;
+    private String actionUrl;   // NEW
     private boolean read;
     private LocalDateTime createdAt;
 }

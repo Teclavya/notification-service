@@ -1,10 +1,12 @@
 package com.teclavya.notification.service.impl;
 
+import com.teclavya.notification.dto.request.InternalSendRequest;
 import com.teclavya.notification.dto.request.SendNotificationRequest;
 import com.teclavya.notification.dto.request.UpdatePreferencesRequest;
 import com.teclavya.notification.dto.response.NotificationDto;
 import com.teclavya.notification.dto.response.NotificationPreferenceDto;
 import com.teclavya.notification.entities.*;
+import com.teclavya.notification.publisher.NotificationPublisher;
 import com.teclavya.notification.repo.*;
 import com.teclavya.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +15,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -25,6 +26,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final NotificationPreferenceRepository preferenceRepository;
+    private final NotificationPublisher notificationPublisher;  // NEW
 
     @Value("${application.notification.max-push-per-day:3}")
     private int maxPushPerDay;
@@ -35,44 +37,56 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     @Transactional
     public void sendNotification(SendNotificationRequest request) {
-        NotificationType type;
-        try {
-            type = NotificationType.valueOf(request.getNotificationType());
-        } catch (IllegalArgumentException e) {
-            type = NotificationType.GENERAL;
-        }
+        NotificationType type = resolveType(request.getNotificationType());
+        NotificationPreference pref = getOrDefaultPreference(request.getStudentId(), type);
 
-        NotificationPreference pref = preferenceRepository
-                .findByStudentIdAndNotificationType(request.getStudentId(), type)
-                .orElse(NotificationPreference.builder()
-                        .studentId(request.getStudentId())
-                        .notificationType(type)
-                        .build());
-
-        // Always create in-app notification
         if (pref.isInAppEnabled()) {
-            createNotification(request, NotificationChannel.IN_APP, type);
+            NotificationDto dto = createNotification(
+                    request.getStudentId(), type, NotificationChannel.IN_APP,
+                    request.getTitle(), request.getBody(),
+                    request.getMetadata(), request.getActionUrl());
+            notificationPublisher.publishToWebSocket(dto, request.getStudentId());
         }
 
-        // Rate-limited email
         if (pref.isEmailEnabled()) {
             long emailsSentToday = notificationRepository.countByStudentIdAndChannelAndCreatedAtAfter(
-                    request.getStudentId(), NotificationChannel.EMAIL, LocalDateTime.now().toLocalDate().atStartOfDay());
+                    request.getStudentId(), NotificationChannel.EMAIL,
+                    LocalDateTime.now().toLocalDate().atStartOfDay());
             if (emailsSentToday < maxEmailPerDay) {
-                createNotification(request, NotificationChannel.EMAIL, type);
-                log.info("Email notification queued for student '{}'", request.getStudentId());
+                createNotification(request.getStudentId(), type, NotificationChannel.EMAIL,
+                        request.getTitle(), request.getBody(),
+                        request.getMetadata(), request.getActionUrl());
             }
         }
 
-        // Rate-limited push
         if (pref.isPushEnabled()) {
             long pushSentToday = notificationRepository.countByStudentIdAndChannelAndCreatedAtAfter(
-                    request.getStudentId(), NotificationChannel.PUSH, LocalDateTime.now().toLocalDate().atStartOfDay());
+                    request.getStudentId(), NotificationChannel.PUSH,
+                    LocalDateTime.now().toLocalDate().atStartOfDay());
             if (pushSentToday < maxPushPerDay) {
-                createNotification(request, NotificationChannel.PUSH, type);
-                log.info("Push notification queued for student '{}'", request.getStudentId());
+                createNotification(request.getStudentId(), type, NotificationChannel.PUSH,
+                        request.getTitle(), request.getBody(),
+                        request.getMetadata(), request.getActionUrl());
             }
         }
+    }
+
+    @Override
+    @Transactional
+    public NotificationDto sendNotificationInternal(InternalSendRequest request) {
+        NotificationType type = resolveType(request.getNotificationType());
+        NotificationDto dto = createNotification(
+                request.getStudentId(), type, NotificationChannel.IN_APP,
+                request.getTitle(), request.getBody(),
+                request.getMetadata(), request.getActionUrl());
+        notificationPublisher.publishToWebSocket(dto, request.getStudentId());
+        return dto;
+    }
+
+    @Override
+    @Transactional
+    public List<NotificationDto> sendNotificationBatch(List<InternalSendRequest> requests) {
+        return requests.stream().map(this::sendNotificationInternal).toList();
     }
 
     @Override
@@ -106,6 +120,17 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
+    public long getUnreadCount(String studentId) {
+        return notificationRepository.countByStudentIdAndIsReadFalse(studentId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteNotification(String notificationId) {
+        notificationRepository.deleteById(UUID.fromString(notificationId));
+    }
+
+    @Override
     public List<NotificationPreferenceDto> getPreferences(String studentId) {
         return preferenceRepository.findByStudentId(studentId).stream()
                 .map(p -> NotificationPreferenceDto.builder()
@@ -123,30 +148,34 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     public void updatePreference(String studentId, UpdatePreferencesRequest request) {
         NotificationType type = NotificationType.valueOf(request.getNotificationType());
-        NotificationPreference pref = preferenceRepository.findByStudentIdAndNotificationType(studentId, type)
-                .orElse(NotificationPreference.builder()
-                        .studentId(studentId)
-                        .notificationType(type)
-                        .build());
-
+        NotificationPreference pref = getOrDefaultPreference(studentId, type);
         if (request.getInAppEnabled() != null) pref.setInAppEnabled(request.getInAppEnabled());
         if (request.getEmailEnabled() != null) pref.setEmailEnabled(request.getEmailEnabled());
         if (request.getPushEnabled() != null) pref.setPushEnabled(request.getPushEnabled());
         if (request.getQuietHoursStart() != null) pref.setQuietHoursStart(request.getQuietHoursStart());
         if (request.getQuietHoursEnd() != null) pref.setQuietHoursEnd(request.getQuietHoursEnd());
-
         preferenceRepository.save(pref);
     }
 
-    private void createNotification(SendNotificationRequest request, NotificationChannel channel, NotificationType type) {
-        notificationRepository.save(Notification.builder()
-                .studentId(request.getStudentId())
-                .notificationType(type)
-                .channel(channel)
-                .title(request.getTitle())
-                .body(request.getBody())
-                .metadata(request.getMetadata())
+    private NotificationType resolveType(String raw) {
+        try { return NotificationType.valueOf(raw); }
+        catch (IllegalArgumentException e) { return NotificationType.GENERAL; }
+    }
+
+    private NotificationPreference getOrDefaultPreference(String studentId, NotificationType type) {
+        return preferenceRepository.findByStudentIdAndNotificationType(studentId, type)
+                .orElse(NotificationPreference.builder()
+                        .studentId(studentId).notificationType(type).build());
+    }
+
+    private NotificationDto createNotification(
+            String studentId, NotificationType type, NotificationChannel channel,
+            String title, String body, java.util.Map<String, Object> metadata, String actionUrl) {
+        Notification saved = notificationRepository.save(Notification.builder()
+                .studentId(studentId).notificationType(type).channel(channel)
+                .title(title).body(body).metadata(metadata).actionUrl(actionUrl)
                 .build());
+        return mapToDto(saved);
     }
 
     private NotificationDto mapToDto(Notification n) {
@@ -154,11 +183,9 @@ public class NotificationServiceImpl implements NotificationService {
                 .notificationId(n.getNotificationId().toString())
                 .notificationType(n.getNotificationType().name())
                 .channel(n.getChannel().name())
-                .title(n.getTitle())
-                .body(n.getBody())
-                .metadata(n.getMetadata())
-                .read(n.isRead())
-                .createdAt(n.getCreatedAt())
+                .title(n.getTitle()).body(n.getBody())
+                .metadata(n.getMetadata()).actionUrl(n.getActionUrl())
+                .read(n.isRead()).createdAt(n.getCreatedAt())
                 .build();
     }
 }

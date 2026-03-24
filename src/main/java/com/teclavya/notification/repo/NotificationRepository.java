@@ -9,7 +9,14 @@ import java.util.List;
 import java.util.UUID;
 
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
+
     List<Notification> findByStudentIdAndIsReadFalseOrderByCreatedAtDesc(String studentId);
+
     List<Notification> findByStudentIdOrderByCreatedAtDesc(String studentId, Pageable pageable);
+
     long countByStudentIdAndChannelAndCreatedAtAfter(String studentId, NotificationChannel channel, LocalDateTime after);
+
+    long countByStudentIdAndIsReadFalse(String studentId);
+
+    int deleteByExpiresAtBefore(LocalDateTime before);
 }

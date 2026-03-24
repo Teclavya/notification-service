@@ -1,6 +1,7 @@
 package com.teclavya.notification.entities;
 
 public enum NotificationType {
+
     // Existing
     STREAK_AT_RISK,
     DAILY_CHALLENGE_AVAILABLE,
@@ -11,7 +12,10 @@ public enum NotificationType {
     WEEKLY_SUMMARY,
     COMEBACK_INCENTIVE,
     ACHIEVEMENT_UNLOCKED,
+
+    // General
     GENERAL,
+
     // New platform event types
     ASSESSMENT_GRADED,
     PR_REVIEWED,
@@ -20,10 +24,10 @@ public enum NotificationType {
     COHORT_POST_CREATED,
     COHORT_POST_REPLY,
     SESSION_BOOKED,
-    SESSION_REMINDER
-} 
+    SESSION_REMINDER,
+
+    // Content / Badge related
     CONTENT_REQUEST_STATUS_CHANGE,
     CONTENT_REQUEST_LIVE,
-    PATH_PIONEER_BADGE,
-    GENERAL
+    PATH_PIONEER_BADGE
 }

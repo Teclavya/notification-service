@@ -22,7 +22,7 @@ public class EmailTemplateRenderer {
     /**
      * Load and render a template.
      *
-     * @param templateId file name without extension (e.g. "cohort-invite-email")
+     * @param templateId file name without extension (e.g. "cohort-invite")
      * @param params     placeholder substitutions; each {@code {key}} in the template
      *                   is replaced with the corresponding value
      * @return rendered HTML string

@@ -37,6 +37,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *  1. Valid request + correct internal token → 202 + { "status": "SENT" }
  *  2. Missing / wrong internal token → 401
  *  3. JavaMailSender throwing MailException → 500
+ *  4. Blank 'to' field → 400
+ *  5. Malformed email address in 'to' → 400
+ *  6. Unknown templateId → 400
  */
 @WebMvcTest(
     controllers = NotificationController.class,
@@ -74,7 +77,7 @@ class NotificationControllerEmailTest {
         return SendEmailRequest.builder()
                 .to("friend@example.com")
                 .subject("You're invited to join TestCohort cohort on Teclavya")
-                .templateId("cohort-invite-email")
+                .templateId("cohort-invite")
                 .params(Map.of(
                         "cohortName", "TestCohort",
                         "acceptUrl", "https://teclavya.com/cohorts/invitations/abc123/accept"
@@ -148,13 +151,54 @@ class NotificationControllerEmailTest {
         SendEmailRequest badRequest = SendEmailRequest.builder()
                 .to("")           // @NotBlank violation
                 .subject("Subject")
-                .templateId("cohort-invite-email")
+                .templateId("cohort-invite")
                 .build();
 
         mockMvc.perform(post(ENDPOINT)
                 .header("X-Internal-Token", VALID_TOKEN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(badRequest)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(emailService);
+    }
+
+    @Test
+    @DisplayName("POST /email — malformed 'to' address → 400 (@Email violation)")
+    void shouldReturn400WhenToAddressMalformed() throws Exception {
+        SendEmailRequest badRequest = SendEmailRequest.builder()
+                .to("not-an-email")      // @Email violation
+                .subject("Subject")
+                .templateId("cohort-invite")
+                .params(Map.of("cohortName", "TestCohort", "acceptUrl", "https://teclavya.com/accept"))
+                .build();
+
+        mockMvc.perform(post(ENDPOINT)
+                .header("X-Internal-Token", VALID_TOKEN)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(badRequest)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(emailService);
+    }
+
+    @Test
+    @DisplayName("POST /email — unknown templateId → 400")
+    void shouldReturn400WhenTemplateIdUnknown() throws Exception {
+        when(emailTemplateRenderer.render(eq("no-such-template"), anyMap()))
+                .thenThrow(new IllegalArgumentException("Email template not found: templates/no-such-template.html"));
+
+        SendEmailRequest req = SendEmailRequest.builder()
+                .to("friend@example.com")
+                .subject("Subject")
+                .templateId("no-such-template")
+                .params(Map.of())
+                .build();
+
+        mockMvc.perform(post(ENDPOINT)
+                .header("X-Internal-Token", VALID_TOKEN)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(emailService);

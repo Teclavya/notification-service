@@ -89,6 +89,13 @@
     <artifactId>spring-boot-starter-data-redis</artifactId>
 </dependency>
 
+        <!-- Resilience4j — fail-closed content-safety verifier (BE-3) -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.2.0</version>
+        </dependency>
+
     </dependencies>
     <build>
         <plugins>

@@ -4,7 +4,9 @@ import com.teclavya.notification.config.TestSecurityConfig;
 import com.teclavya.notification.dto.response.NotificationDto;
 import com.teclavya.notification.security.JwtAuthenticationFilter;
 import com.teclavya.notification.security.JwtUtil;
+import com.teclavya.notification.service.EmailService;
 import com.teclavya.notification.service.NotificationService;
+import com.teclavya.notification.service.impl.EmailTemplateRenderer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +39,12 @@ class NotificationControllerTest {
 
     @MockBean
     private NotificationService notificationService;
+
+    @MockBean
+    private EmailService emailService;
+
+    @MockBean
+    private EmailTemplateRenderer emailTemplateRenderer;
 
     @MockBean
     private JwtUtil jwtUtil;

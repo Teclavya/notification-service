@@ -23,7 +23,8 @@ public class SecurityConfig {
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/**").permitAll()
-                .requestMatchers("/api/v1/notifications/internal/**").permitAll() // NEW
+                .requestMatchers("/api/v1/notifications/internal/**").permitAll()
+                .requestMatchers("/api/v1/notifications/email").permitAll() // internal token auth handled in controller
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);

@@ -24,4 +24,7 @@ public class NotificationPreference {
     private Integer quietHoursStart = 22;
     @Builder.Default
     private Integer quietHoursEnd = 7;
+    @Builder.Default
+    private boolean quietHoursEnabled = true;
+    private String timezone;
 }

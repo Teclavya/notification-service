@@ -29,5 +29,11 @@ public enum NotificationType {
     // Content / Badge related
     CONTENT_REQUEST_STATUS_CHANGE,
     CONTENT_REQUEST_LIVE,
-    PATH_PIONEER_BADGE
+    PATH_PIONEER_BADGE,
+
+    // Lifecycle send-gate (BE-1)
+    INACTIVITY_REENGAGEMENT,
+    STRUGGLE_INTERVENTION,
+    MASTERY_CELEBRATION,
+    ONBOARDING_NUDGE
 }

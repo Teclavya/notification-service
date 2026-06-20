@@ -148,8 +148,8 @@ class LifecycleQueueServiceTest {
     class ApplyVerdictTests {
 
         @Test
-        @DisplayName("PASS: sets AWAITING_VETO_WINDOW + PASS verdict + veto_window_expires_at ~5m from now")
-        void applyVerdict_pass_setsAwaitingVetoWindow() {
+        @DisplayName("PASS: sets SAFETY_CHECKED (not AWAITING_VETO_WINDOW) + PASS verdict + veto_window_expires_at ~5m from now")
+        void applyVerdict_pass_setsSafetyChecked() {
             LifecycleMessageReviewQueue row = rowInState(LifecycleMessageStatus.DRAFTED);
             stubLoad(row);
 
@@ -157,7 +157,8 @@ class LifecycleQueueServiceTest {
             LifecycleMessageReviewQueue result = service.applyVerdict(row.getId(), true, "ok");
             Instant after = Instant.now();
 
-            assertThat(result.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
+            // AC-2.2 / AC-3.2 / GOLDEN-01 step 2: SAFETY_CHECKED must be a real persisted state
+            assertThat(result.getStatus()).isEqualTo(LifecycleMessageStatus.SAFETY_CHECKED);
             assertThat(result.getSafetyVerdict()).isEqualTo("PASS");
             assertThat(result.getVetoWindowExpiresAt())
                     .isAfter(before.plus(4, ChronoUnit.MINUTES))
@@ -180,6 +181,92 @@ class LifecycleQueueServiceTest {
     }
 
     // -----------------------------------------------------------------------
+    // openVetoWindow
+    // -----------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("openVetoWindow")
+    class OpenVetoWindowTests {
+
+        @Test
+        @DisplayName("legal: SAFETY_CHECKED + PASS → AWAITING_VETO_WINDOW")
+        void openVetoWindow_fromSafetyChecked_setsAwaitingVetoWindow() {
+            LifecycleMessageReviewQueue row = rowInStateWithVerdict(
+                    LifecycleMessageStatus.SAFETY_CHECKED, "PASS");
+            row.setVetoWindowExpiresAt(Instant.now().plus(5, ChronoUnit.MINUTES));
+            stubLoad(row);
+
+            LifecycleMessageReviewQueue result = service.openVetoWindow(row.getId());
+
+            assertThat(result.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
+        }
+
+        @Test
+        @DisplayName("illegal: DRAFTED → openVetoWindow throws")
+        void openVetoWindow_fromDrafted_throws() {
+            LifecycleMessageReviewQueue row = rowInState(LifecycleMessageStatus.DRAFTED);
+            stubLoad(row);
+
+            assertThatThrownBy(() -> service.openVetoWindow(row.getId()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("DRAFTED");
+        }
+
+        @Test
+        @DisplayName("illegal: AWAITING_VETO_WINDOW → openVetoWindow throws (already past SAFETY_CHECKED)")
+        void openVetoWindow_fromAwaitingVetoWindow_throws() {
+            LifecycleMessageReviewQueue row = rowInStateWithVerdict(
+                    LifecycleMessageStatus.AWAITING_VETO_WINDOW, "PASS");
+            stubLoad(row);
+
+            assertThatThrownBy(() -> service.openVetoWindow(row.getId()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("AWAITING_VETO_WINDOW");
+        }
+
+        @Test
+        @DisplayName("illegal: SAFETY_REJECTED → openVetoWindow throws")
+        void openVetoWindow_fromSafetyRejected_throws() {
+            LifecycleMessageReviewQueue row = rowInStateWithVerdict(
+                    LifecycleMessageStatus.SAFETY_REJECTED, "FAIL");
+            stubLoad(row);
+
+            assertThatThrownBy(() -> service.openVetoWindow(row.getId()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("SAFETY_REJECTED");
+        }
+
+        @Test
+        @DisplayName("illegal: APPROVED → openVetoWindow throws")
+        void openVetoWindow_fromApproved_throws() {
+            LifecycleMessageReviewQueue row = rowInStateWithVerdict(
+                    LifecycleMessageStatus.APPROVED, "PASS");
+            stubLoad(row);
+
+            assertThatThrownBy(() -> service.openVetoWindow(row.getId()))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("verify flow: applyVerdict(PASS) then openVetoWindow yields AWAITING_VETO_WINDOW — two distinct saves")
+        void verifyFlow_twoWritesProduceSafetyCheckedThenAwaitingVetoWindow() {
+            LifecycleMessageReviewQueue row = rowInState(LifecycleMessageStatus.DRAFTED);
+            stubLoad(row);
+
+            // First write: applyVerdict → SAFETY_CHECKED
+            LifecycleMessageReviewQueue afterVerdict = service.applyVerdict(row.getId(), true, "clean");
+            assertThat(afterVerdict.getStatus()).isEqualTo(LifecycleMessageStatus.SAFETY_CHECKED);
+
+            // Second write: openVetoWindow → AWAITING_VETO_WINDOW
+            LifecycleMessageReviewQueue afterOpen = service.openVetoWindow(row.getId());
+            assertThat(afterOpen.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
+
+            // repository.save must be called twice (once per write)
+            verify(repository, times(2)).save(any());
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // approve
     // -----------------------------------------------------------------------
 
@@ -192,6 +279,18 @@ class LifecycleQueueServiceTest {
         void approve_fromAwaitingWithPass_setsApproved() {
             LifecycleMessageReviewQueue row = rowInStateWithVerdict(
                     LifecycleMessageStatus.AWAITING_VETO_WINDOW, "PASS");
+            stubLoad(row);
+
+            LifecycleMessageReviewQueue result = service.approve(row.getId());
+
+            assertThat(result.getStatus()).isEqualTo(LifecycleMessageStatus.APPROVED);
+        }
+
+        @Test
+        @DisplayName("legal: SAFETY_CHECKED + PASS → APPROVED (AC-2.4 early admin approval)")
+        void approve_fromSafetyCheckedWithPass_setsApproved() {
+            LifecycleMessageReviewQueue row = rowInStateWithVerdict(
+                    LifecycleMessageStatus.SAFETY_CHECKED, "PASS");
             stubLoad(row);
 
             LifecycleMessageReviewQueue result = service.approve(row.getId());
@@ -235,10 +334,32 @@ class LifecycleQueueServiceTest {
         }
 
         @Test
-        @DisplayName("illegal: already APPROVED → approve throws (not AWAITING_VETO_WINDOW)")
+        @DisplayName("illegal: SAFETY_CHECKED + FAIL verdict → approve throws (safety invariant — no bypass)")
+        void approve_fromSafetyCheckedWithFailVerdict_throws() {
+            LifecycleMessageReviewQueue row = rowInStateWithVerdict(
+                    LifecycleMessageStatus.SAFETY_CHECKED, "FAIL");
+            stubLoad(row);
+
+            assertThatThrownBy(() -> service.approve(row.getId()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("FAIL");
+        }
+
+        @Test
+        @DisplayName("illegal: already APPROVED → approve throws (not SAFETY_CHECKED or AWAITING_VETO_WINDOW)")
         void approve_fromApproved_throws() {
             LifecycleMessageReviewQueue row = rowInStateWithVerdict(
                     LifecycleMessageStatus.APPROVED, "PASS");
+            stubLoad(row);
+
+            assertThatThrownBy(() -> service.approve(row.getId()))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("no-bypass invariant: DRAFTED + null verdict cannot reach APPROVED via approve")
+        void approve_noBypass_draftedCannotReachApproved() {
+            LifecycleMessageReviewQueue row = rowInState(LifecycleMessageStatus.DRAFTED);
             stubLoad(row);
 
             assertThatThrownBy(() -> service.approve(row.getId()))
@@ -319,6 +440,22 @@ class LifecycleQueueServiceTest {
     @Nested
     @DisplayName("editBody")
     class EditBodyTests {
+
+        @Test
+        @DisplayName("legal: SAFETY_CHECKED → body updated, reset to DRAFTED, veto window cleared, verdict cleared")
+        void editBody_fromSafetyChecked_resetsToDrafted() {
+            LifecycleMessageReviewQueue row = rowInStateWithVerdict(
+                    LifecycleMessageStatus.SAFETY_CHECKED, "PASS");
+            row.setVetoWindowExpiresAt(Instant.now().plus(5, ChronoUnit.MINUTES));
+            stubLoad(row);
+
+            LifecycleMessageReviewQueue result = service.editBody(row.getId(), "Revised body");
+
+            assertThat(result.getMessageBody()).isEqualTo("Revised body");
+            assertThat(result.getStatus()).isEqualTo(LifecycleMessageStatus.DRAFTED);
+            assertThat(result.getSafetyVerdict()).isNull();
+            assertThat(result.getVetoWindowExpiresAt()).isNull();
+        }
 
         @Test
         @DisplayName("legal: AWAITING_VETO_WINDOW → body updated, reset to DRAFTED, veto window cleared")

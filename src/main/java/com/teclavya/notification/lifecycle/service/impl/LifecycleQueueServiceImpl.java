@@ -81,10 +81,11 @@ public class LifecycleQueueServiceImpl implements LifecycleQueueService {
 
         if (pass) {
             row.setSafetyVerdict(VERDICT_PASS);
-            // Collapse SAFETY_CHECKED into AWAITING_VETO_WINDOW in one step
-            row.setStatus(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
+            // Persist SAFETY_CHECKED as a real, distinct state (AC-2.2, AC-3.2, GOLDEN-01 step 2).
+            // Caller must follow up with openVetoWindow(id) to advance to AWAITING_VETO_WINDOW.
+            row.setStatus(LifecycleMessageStatus.SAFETY_CHECKED);
             row.setVetoWindowExpiresAt(Instant.now().plus(VETO_WINDOW_MINUTES, ChronoUnit.MINUTES));
-            log.debug("Safety PASS id={} veto_expires={}", id, row.getVetoWindowExpiresAt());
+            log.debug("Safety PASS id={} status=SAFETY_CHECKED veto_expires={}", id, row.getVetoWindowExpiresAt());
         } else {
             row.setSafetyVerdict(VERDICT_FAIL);
             row.setStatus(LifecycleMessageStatus.SAFETY_REJECTED);
@@ -92,6 +93,32 @@ public class LifecycleQueueServiceImpl implements LifecycleQueueService {
             log.debug("Safety FAIL id={}", id);
         }
 
+        return repository.save(row);
+    }
+
+    // ------------------------------------------------------------------
+    // openVetoWindow
+    // ------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public LifecycleMessageReviewQueue openVetoWindow(UUID id) {
+        LifecycleMessageReviewQueue row = load(id);
+
+        if (row.getStatus() != LifecycleMessageStatus.SAFETY_CHECKED) {
+            throw new IllegalStateException(
+                    "Cannot open veto window for message in state " + row.getStatus() +
+                    " (id=" + id + "). Only SAFETY_CHECKED messages may transition to AWAITING_VETO_WINDOW.");
+        }
+        if (!VERDICT_PASS.equals(row.getSafetyVerdict())) {
+            throw new IllegalStateException(
+                    "Cannot open veto window for message id=" + id +
+                    " with safety_verdict=" + row.getSafetyVerdict() +
+                    ". Verdict must be PASS.");
+        }
+
+        row.setStatus(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
+        log.debug("Veto window opened id={}", id);
         return repository.save(row);
     }
 
@@ -104,11 +131,13 @@ public class LifecycleQueueServiceImpl implements LifecycleQueueService {
     public LifecycleMessageReviewQueue approve(UUID id) {
         LifecycleMessageReviewQueue row = load(id);
 
-        // CRITICAL invariant: no APPROVED without PASS verdict AND correct prior state
-        if (row.getStatus() != LifecycleMessageStatus.AWAITING_VETO_WINDOW) {
+        // CRITICAL invariant: no APPROVED without PASS verdict AND correct prior state.
+        // AC-2.4: admin may approve a SAFETY_CHECKED message early (before veto window opens).
+        if (row.getStatus() != LifecycleMessageStatus.AWAITING_VETO_WINDOW
+                && row.getStatus() != LifecycleMessageStatus.SAFETY_CHECKED) {
             throw new IllegalStateException(
                     "Cannot approve message in state " + row.getStatus() +
-                    " (id=" + id + "). Only AWAITING_VETO_WINDOW messages may be approved.");
+                    " (id=" + id + "). Only SAFETY_CHECKED or AWAITING_VETO_WINDOW messages may be approved.");
         }
         if (!VERDICT_PASS.equals(row.getSafetyVerdict())) {
             throw new IllegalStateException(
@@ -154,10 +183,11 @@ public class LifecycleQueueServiceImpl implements LifecycleQueueService {
         LifecycleMessageReviewQueue row = load(id);
 
         if (row.getStatus() != LifecycleMessageStatus.AWAITING_VETO_WINDOW
+                && row.getStatus() != LifecycleMessageStatus.SAFETY_CHECKED
                 && row.getStatus() != LifecycleMessageStatus.SAFETY_REJECTED) {
             throw new IllegalStateException(
                     "Cannot edit body of message in state " + row.getStatus() +
-                    " (id=" + id + "). Only AWAITING_VETO_WINDOW or SAFETY_REJECTED messages may be edited.");
+                    " (id=" + id + "). Only SAFETY_CHECKED, AWAITING_VETO_WINDOW, or SAFETY_REJECTED messages may be edited.");
         }
 
         row.setMessageBody(body);

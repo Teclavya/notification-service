@@ -27,9 +27,12 @@ public interface LifecycleQueueService {
     /**
      * Records the content-safety verdict.
      *
-     * PASS path: status → AWAITING_VETO_WINDOW, safety_verdict=PASS,
-     *            veto_window_expires_at = now + 5 minutes.
+     * PASS path: sets safety_verdict=PASS, veto_window_expires_at = now + 5 minutes,
+     *            status → SAFETY_CHECKED (persisted as a real, distinct state per AC-2.2/AC-3.2).
      * FAIL path: status → SAFETY_REJECTED, safety_verdict=FAIL.
+     *
+     * After a PASS call, the caller MUST immediately call {@link #openVetoWindow(UUID)}
+     * to advance to AWAITING_VETO_WINDOW, creating the two-write audit trail.
      *
      * @param pass    true = PASS, false = FAIL
      * @param details free-text detail from the verifier (stored in safety_details)
@@ -37,9 +40,21 @@ public interface LifecycleQueueService {
     LifecycleMessageReviewQueue applyVerdict(UUID id, boolean pass, String details);
 
     /**
+     * Transitions a SAFETY_CHECKED message to AWAITING_VETO_WINDOW.
+     * Guard: only from SAFETY_CHECKED with safety_verdict=PASS.
+     * Throws IllegalStateException from any other state.
+     *
+     * This is the second write in the verify flow; it is called immediately after
+     * applyVerdict(PASS) so both states are persisted in sequence.
+     */
+    LifecycleMessageReviewQueue openVetoWindow(UUID id);
+
+    /**
      * Admin or poller approves the message for sending.
-     * Guard: only allowed from AWAITING_VETO_WINDOW with safety_verdict=PASS.
+     * Guard: allowed from SAFETY_CHECKED or AWAITING_VETO_WINDOW, both requiring
+     *        safety_verdict=PASS (AC-2.4 — admin may approve early from SAFETY_CHECKED).
      * Throws IllegalStateException otherwise (maps to HTTP 409).
+     * No-bypass invariant: APPROVED is never reachable without safety_verdict=PASS.
      */
     LifecycleMessageReviewQueue approve(UUID id);
 
@@ -52,8 +67,8 @@ public interface LifecycleQueueService {
 
     /**
      * Admin edits the message body and resets to DRAFTED for re-verification.
-     * Clears veto_window_expires_at.
-     * Guard: only allowed from AWAITING_VETO_WINDOW or SAFETY_REJECTED.
+     * Clears veto_window_expires_at, safety_verdict, and safety_details.
+     * Guard: allowed from SAFETY_CHECKED, AWAITING_VETO_WINDOW, or SAFETY_REJECTED.
      */
     LifecycleMessageReviewQueue editBody(UUID id, String body);
 

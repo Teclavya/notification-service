@@ -5,12 +5,14 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.mail.MailException;
 import org.springframework.mail.MailPreparationException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
 import java.util.Optional;
 
 /**
@@ -29,11 +31,15 @@ public class EmailServiceImpl implements EmailService {
 
     private final Optional<JavaMailSender> mailSender;
     private final String fromAddress;
+    private final boolean forceLogOnly;
 
     public EmailServiceImpl(
             Optional<JavaMailSender> mailSender,
-            @Value("${spring.mail.username:noreply@teclavya.com}") String fromAddress) {
+            @Value("${spring.mail.username:noreply@teclavya.com}") String fromAddress,
+            @Value("${notification.email.force-log-only:false}") boolean forceLogOnly,
+            Environment environment) {
         this.mailSender = mailSender;
+        this.forceLogOnly = forceLogOnly || Arrays.asList(environment.getActiveProfiles()).contains("dev");
         // Guard: if the configured value is blank (username not set), fall back to a safe default
         this.fromAddress = (fromAddress == null || fromAddress.isBlank())
                 ? "noreply@teclavya.com"
@@ -42,7 +48,7 @@ public class EmailServiceImpl implements EmailService {
 
     @Override
     public void sendEmail(String to, String subject, String htmlBody) {
-        if (mailSender.isEmpty()) {
+        if (forceLogOnly || mailSender.isEmpty()) {
             log.warn("[EMAIL LOG-ONLY] to='{}' subject='{}' — JavaMailSender not configured; "
                     + "set spring.mail.host to enable outbound dispatch", to, subject);
             return;

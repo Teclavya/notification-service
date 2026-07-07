@@ -16,6 +16,16 @@ spring:
           starttls:
             enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:true}
 
+# JWT secret used by JwtUtil for verifying inbound tokens.
+# application-dev.yaml and application-test.yaml override this in those profiles.
+# In prod / any profile without an override, fall back to the same dev-default
+# hex key used by the rest of the platform so the service still starts;
+# production deploys MUST override JWT_SECRET via env var.
+application:
+  jwt:
+    secret: ${JWT_SECRET:4D6251655468576D5A7134743777217A25432A462D4A614E645267556B587032}
+    expiration: 86400000
+
 # Internal service-to-service token (cohorts-latest → notification-service)
 internal:
   service:

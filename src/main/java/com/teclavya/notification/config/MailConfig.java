@@ -2,7 +2,7 @@ package com.teclavya.notification.config;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -16,7 +16,10 @@ import java.util.Properties;
  * the bean is absent and EmailService logs instead of sending.
  */
 @Configuration
-@ConditionalOnProperty("spring.mail.host")
+@ConditionalOnExpression(
+        "T(org.springframework.util.StringUtils).hasText('${spring.mail.host:}') and " +
+        "T(org.springframework.util.StringUtils).hasText('${spring.mail.username:}') and " +
+        "T(org.springframework.util.StringUtils).hasText('${spring.mail.password:}')")
 @Slf4j
 public class MailConfig {
 

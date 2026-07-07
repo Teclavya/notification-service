@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.env.Environment;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.javamail.JavaMailSender;
 
@@ -29,15 +30,19 @@ class EmailServiceTest {
     @Mock
     private MimeMessage mimeMessage;
 
+    @Mock
+    private Environment environment;
+
     private EmailServiceImpl emailServiceWithSender;
     private EmailServiceImpl emailServiceWithoutSender;
 
     @BeforeEach
     void setUp() {
+        when(environment.getActiveProfiles()).thenReturn(new String[0]);
         emailServiceWithSender = new EmailServiceImpl(
-                Optional.of(mailSender), "noreply@teclavya.com");
+                Optional.of(mailSender), "noreply@teclavya.com", false, environment);
         emailServiceWithoutSender = new EmailServiceImpl(
-                Optional.empty(), "noreply@teclavya.com");
+                Optional.empty(), "noreply@teclavya.com", false, environment);
     }
 
     @Test

@@ -30,3 +30,20 @@ application:
 internal:
   service:
     token: ${INTERNAL_SERVICE_TOKEN:}
+
+# Resilience4j — content-safety verifier circuit-breaker + time-limiter (BE-3)
+resilience4j:
+  circuitbreaker:
+    instances:
+      contentSafetyVerifier:
+        registerHealthIndicator: false
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+  timelimiter:
+    instances:
+      contentSafetyVerifier:
+        timeoutDuration: 4s
+        cancelRunningFuture: true

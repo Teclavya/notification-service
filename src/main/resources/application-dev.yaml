@@ -42,6 +42,23 @@ spring:
           starttls:
             enable: true
 
+# Resilience4j — content-safety verifier (dev: relaxed thresholds, same 4 s timeout)
+resilience4j:
+  circuitbreaker:
+    instances:
+      contentSafetyVerifier:
+        registerHealthIndicator: false
+        slidingWindowSize: 5
+        failureRateThreshold: 60
+        waitDurationInOpenState: 5s
+        permittedNumberOfCallsInHalfOpenState: 2
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+  timelimiter:
+    instances:
+      contentSafetyVerifier:
+        timeoutDuration: 4s
+        cancelRunningFuture: true
+
 application:
   cors: http://127.0.0.1:3000, http://localhost:3000
   jwt:

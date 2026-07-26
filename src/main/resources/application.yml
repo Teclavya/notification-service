@@ -17,13 +17,13 @@ spring:
             enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:true}
 
 # JWT secret used by JwtUtil for verifying inbound tokens.
-# application-dev.yaml and application-test.yaml override this in those profiles.
-# In prod / any profile without an override, fall back to the same dev-default
-# hex key used by the rest of the platform so the service still starts;
-# production deploys MUST override JWT_SECRET via env var.
+# application-dev.yaml and application-test.yaml override this in those profiles with their
+# own non-prod values. JWT_SECRET is REQUIRED here (no hardcoded fallback) — JwtUtil's
+# @PostConstruct SecretGuard check fails the service at startup if it is unset, blank,
+# a placeholder, too short, or the known-compromised fleet-wide dev-default hex key.
 application:
   jwt:
-    secret: ${JWT_SECRET:4D6251655468576D5A7134743777217A25432A462D4A614E645267556B587032}
+    secret: ${JWT_SECRET}
     expiration: 86400000
 
 # Internal service-to-service token (cohorts-latest → notification-service)

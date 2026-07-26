@@ -2,6 +2,7 @@ package com.teclavya.notification.security;
 
 import javax.crypto.SecretKey;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +15,12 @@ import io.jsonwebtoken.security.Keys;
 public class JwtUtil {
     @Value("${application.jwt.secret}")
     private String secret;
+
+    /** Fail-loud startup guard (P0-1): refuses to boot on an unset/blank/placeholder/weak/compromised secret. */
+    @PostConstruct
+    public void validateSecret() {
+        SecretGuard.requireStrong("application.jwt.secret", secret);
+    }
 
     public Claims extractAllClaims(String token) {
     SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(secret));

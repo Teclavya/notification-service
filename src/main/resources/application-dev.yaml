@@ -62,7 +62,10 @@ resilience4j:
 application:
   cors: http://127.0.0.1:3000, http://localhost:3000
   jwt:
-    secret: 4D6251655468576D5A7134743777217A25432A462D4A614E645267556B587032
+    # Dev-only secret (distinct from the retired, leaked fleet-wide default). SecretGuard
+    # (JwtUtil#validateSecret) still validates this at startup. Override via JWT_SECRET for any
+    # real environment.
+    secret: ${JWT_SECRET:syrWS9vYggk3iabR7psfJYK3g5KINknA/4EgHkH3pAA=}
     expiration: 86400000
   notification:
     max-push-per-day: 3

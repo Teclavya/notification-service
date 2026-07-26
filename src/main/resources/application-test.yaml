@@ -18,7 +18,9 @@ spring:
 application:
   cors: http://localhost:3000
   jwt:
-    secret: 4D6251655468576D5A7134743777217A25432A462D4A614E645267556B587032
+    # Test-only secret (distinct from the retired, leaked fleet-wide default); >=32 bytes so
+    # SecretGuard (JwtUtil#validateSecret) still passes during the test Spring context boot.
+    secret: ${JWT_SECRET:9UJgXVQPfslW68ePEpOvhc1UND+5VPjBBLZ5hi3Rcr0=}
     expiration: 86400000
   notification:
     max-push-per-day: 3

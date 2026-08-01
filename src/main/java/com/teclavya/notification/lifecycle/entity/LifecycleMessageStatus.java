@@ -17,11 +17,18 @@ package com.teclavya.notification.lifecycle.entity;
  *   AWAITING_VETO_WINDOW → DRAFTED  (editBody — triggers re-verify)
  *   SAFETY_CHECKED → DRAFTED        (editBody — triggers re-verify)
  *   SAFETY_REJECTED → DRAFTED       (editBody — triggers re-verify)
+ *   APPROVED → SUPPRESSED           (markSuppressed — learning-journey gate veto, e.g. quiet hours
+ *                                     / student muted the notification type; NS-BE-2)
+ *   DEFERRED → SUPPRESSED           (markSuppressed)
  *
  * SAFETY_CHECKED is a real, persisted state (AC-2.2, AC-3.2, AC-5.1, GOLDEN-01 step 2).
  * The verify flow persists SAFETY_CHECKED first, then immediately transitions to
  * AWAITING_VETO_WINDOW via openVetoWindow, giving the audit/event trail a real
  * SAFETY_CHECKED row.
+ *
+ * SUPPRESSED is a terminal state (NS-BE-2): a message that was approved/deferred for send but
+ * ultimately withheld by the ethical send-gate. It is distinct from SENT — any query/metric that
+ * counts "messages actually sent" must filter on status=SENT, which SUPPRESSED rows never carry.
  */
 public enum LifecycleMessageStatus {
     DRAFTED,
@@ -31,5 +38,6 @@ public enum LifecycleMessageStatus {
     DEFERRED,
     SENT,
     VETOED,
-    SAFETY_REJECTED
+    SAFETY_REJECTED,
+    SUPPRESSED
 }

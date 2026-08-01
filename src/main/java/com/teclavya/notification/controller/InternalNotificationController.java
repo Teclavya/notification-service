@@ -1,11 +1,15 @@
 package com.teclavya.notification.controller;
 
 import com.teclavya.notification.dto.request.InternalSendRequest;
+import com.teclavya.notification.dto.response.GatedSendResponse;
 import com.teclavya.notification.dto.response.NotificationDto;
+import com.teclavya.notification.lifecycle.entity.LifecycleMessageReviewQueue;
+import com.teclavya.notification.lifecycle.service.LifecycleQueueService;
 import com.teclavya.notification.service.NotificationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,6 +22,7 @@ import java.util.List;
 public class InternalNotificationController {
 
     private final NotificationService notificationService;
+    private final LifecycleQueueService lifecycleQueueService;
 
     /**
      * Service-to-service send — no JWT required.
@@ -30,6 +35,33 @@ public class InternalNotificationController {
                 request.getSourceService(), request.getStudentId());
         NotificationDto dto = notificationService.sendNotificationInternal(request);
         return ResponseEntity.ok(dto);
+    }
+
+    /**
+     * Service-to-service gated send — no JWT required (identical auth/transport posture
+     * to {@link #sendInternal}, network-policy protected, VPS-internal only).
+     * Additive endpoint (ADR-2): does NOT repoint /send. Routes into the lifecycle
+     * ethical send-gate (enqueue → DRAFTED) instead of immediate delivery; the row is
+     * then driven asynchronously by the LifecycleSendGatePoller.
+     */
+    @PostMapping("/send-gated")
+    public ResponseEntity<GatedSendResponse> sendGated(
+            @RequestBody @Valid InternalSendRequest request) {
+        log.info("Gated internal notification from service='{}' for student='{}'",
+                request.getSourceService(), request.getStudentId());
+        LifecycleMessageReviewQueue queued;
+        try {
+            queued = lifecycleQueueService.enqueue(request);
+        } catch (RuntimeException e) {
+            log.error("Failed to enqueue gated notification for student='{}': {}",
+                    request.getStudentId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).<GatedSendResponse>build();
+        }
+        GatedSendResponse response = GatedSendResponse.builder()
+                .queueId(queued.getId().toString())
+                .status(queued.getStatus().name())
+                .build();
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 
     /**

@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -75,11 +76,24 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     public NotificationDto sendNotificationInternal(InternalSendRequest request) {
         NotificationType type = resolveType(request.getNotificationType());
-        NotificationDto dto = createNotification(
-                request.getStudentId(), type, NotificationChannel.IN_APP,
-                request.getTitle(), request.getBody(),
+        return deliver(request.getStudentId(), type, request.getTitle(), request.getBody(),
                 request.getMetadata(), request.getActionUrl());
-        notificationPublisher.publishToWebSocket(dto, request.getStudentId());
+    }
+
+    /**
+     * Delivery primitive (NS-BE-4b) — extracted from the body of the former
+     * {@code sendNotificationInternal} unchanged: creates an IN_APP notification and publishes
+     * it over the websocket. {@code sendNotificationInternal} above now delegates here, and
+     * {@code LifecycleSendGatePoller} calls this directly for gated (learning-journey) sends —
+     * both callers share exactly this one primitive (design §14b, AC-9.3).
+     */
+    @Override
+    @Transactional
+    public NotificationDto deliver(String studentId, NotificationType type, String title, String body,
+                                    Map<String, Object> metadata, String actionUrl) {
+        NotificationDto dto = createNotification(
+                studentId, type, NotificationChannel.IN_APP, title, body, metadata, actionUrl);
+        notificationPublisher.publishToWebSocket(dto, studentId);
         return dto;
     }
 

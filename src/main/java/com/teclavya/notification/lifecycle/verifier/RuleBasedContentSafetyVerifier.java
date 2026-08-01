@@ -22,7 +22,8 @@ import java.util.regex.Pattern;
  * <ol>
  *   <li><b>Length</b> — email notifications: &lt;= 500 chars; all others (in-app): &lt;= 300 chars.</li>
  *   <li><b>Placeholder schema</b> — every <code>{token}</code> in the body must be in the
- *       allowed set: {@code studentName, pathName, topicName, daysSinceActive}.</li>
+ *       allowed set: {@code studentName, pathName, topicName, daysSinceActive, milestoneName,
+ *       targetDate, daysUntilDue, daysOverdue, nextActionLabel}.</li>
  *   <li><b>No-PII</b> — reject bodies that contain a raw email address or an SSN-like pattern.</li>
  * </ol>
  *
@@ -53,7 +54,9 @@ public class RuleBasedContentSafetyVerifier implements ContentSafetyVerifier {
 
     /** Allowed placeholder tokens inside curly braces. */
     private static final Set<String> ALLOWED_PLACEHOLDERS = Set.of(
-            "studentName", "pathName", "topicName", "daysSinceActive"
+            "studentName", "pathName", "topicName", "daysSinceActive",
+            // Learning-journey ethical send-gate templates (NS-BE-2)
+            "milestoneName", "targetDate", "daysUntilDue", "daysOverdue", "nextActionLabel"
     );
 
     /** Pattern to extract all {token} occurrences from a body. */

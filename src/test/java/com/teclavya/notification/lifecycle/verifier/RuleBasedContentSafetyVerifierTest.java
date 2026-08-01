@@ -148,6 +148,56 @@ class RuleBasedContentSafetyVerifierTest {
     }
 
     // -----------------------------------------------------------------------
+    // Rule 2b — Learning-journey placeholder allowlist (NS-BE-2)
+    // -----------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Rule 2: Learning-journey placeholder allowlist (NS-BE-2)")
+    class JourneyPlaceholderRuleTests {
+
+        @Test
+        @DisplayName("Golden template: MILESTONE_DUE_SOON body with milestoneName/pathName/daysUntilDue/nextActionLabel → PASS")
+        void milestoneDueSoon_goldenTemplate_pass() {
+            String body = "Hi {studentName}, your {milestoneName} in {pathName} is due in {daysUntilDue} days. {nextActionLabel}";
+            SafetyVerdict verdict = verifier.runRules(body, "MILESTONE_DUE_SOON");
+            assertThat(verdict.pass()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Golden template: MILESTONE_OVERDUE body with milestoneName/targetDate/daysOverdue → PASS")
+        void milestoneOverdue_goldenTemplate_pass() {
+            String body = "Hi {studentName}, {milestoneName} was due on {targetDate} — you're {daysOverdue} days overdue.";
+            SafetyVerdict verdict = verifier.runRules(body, "MILESTONE_OVERDUE");
+            assertThat(verdict.pass()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Golden template: JOURNEY_IDLE body with daysSinceActive/nextActionLabel → PASS")
+        void journeyIdle_goldenTemplate_pass() {
+            String body = "Hi {studentName}, it's been {daysSinceActive} days. {nextActionLabel}";
+            SafetyVerdict verdict = verifier.runRules(body, "JOURNEY_IDLE");
+            assertThat(verdict.pass()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Golden template: JOURNEY_WEEKLY_SUMMARY body with pathName/topicName → PASS")
+        void journeyWeeklySummary_goldenTemplate_pass() {
+            String body = "Hi {studentName}, this week in {pathName} you covered {topicName}. Keep going!";
+            SafetyVerdict verdict = verifier.runRules(body, "JOURNEY_WEEKLY_SUMMARY");
+            assertThat(verdict.pass()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Unknown token alongside journey placeholders still FAILS")
+        void unknownTokenAmongJourneyPlaceholders_fail() {
+            String body = "Hi {studentName}, {milestoneName} due {daysUntilDue} days, contact {unknownToken}.";
+            SafetyVerdict verdict = verifier.runRules(body, "MILESTONE_DUE_SOON");
+            assertThat(verdict.pass()).isFalse();
+            assertThat(verdict.details()).contains("unknownToken");
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Rule 3 — No-PII
     // -----------------------------------------------------------------------
 

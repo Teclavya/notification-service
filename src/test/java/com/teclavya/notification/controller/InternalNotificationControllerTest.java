@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.teclavya.notification.config.TestSecurityConfig;
 import com.teclavya.notification.dto.request.InternalSendRequest;
 import com.teclavya.notification.dto.response.NotificationDto;
+import com.teclavya.notification.lifecycle.entity.LifecycleMessageReviewQueue;
+import com.teclavya.notification.lifecycle.entity.LifecycleMessageStatus;
+import com.teclavya.notification.lifecycle.service.LifecycleQueueService;
 import com.teclavya.notification.security.JwtAuthenticationFilter;
 import com.teclavya.notification.security.JwtUtil;
 import com.teclavya.notification.service.NotificationService;
@@ -21,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -45,6 +49,9 @@ class InternalNotificationControllerTest {
 
     @MockBean
     private NotificationService notificationService;
+
+    @MockBean
+    private LifecycleQueueService lifecycleQueueService;
 
     @MockBean
     private JwtUtil jwtUtil;
@@ -114,5 +121,149 @@ class InternalNotificationControllerTest {
                 .content(objectMapper.writeValueAsString(requests)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    // -----------------------------------------------------------------------
+    // POST /internal/send-gated (NS-BE-1)
+    // -----------------------------------------------------------------------
+
+    private LifecycleMessageReviewQueue draftedRow(UUID id) {
+        return LifecycleMessageReviewQueue.builder()
+                .id(id)
+                .studentId("student-1")
+                .notificationType("MILESTONE_DUE_SOON")
+                .messageBody("Your milestone is due soon")
+                .status(LifecycleMessageStatus.DRAFTED)
+                .tier("AMBER")
+                .build();
+    }
+
+    @Test
+    @DisplayName("POST /internal/send-gated - valid request returns 202 with DRAFTED status")
+    void shouldReturn202AndDraftedOnValidGatedSend() throws Exception {
+        UUID queueId = UUID.randomUUID();
+        InternalSendRequest request = InternalSendRequest.builder()
+                .sourceService("learning-progress-tracker")
+                .studentId("student-1")
+                .notificationType("MILESTONE_DUE_SOON")
+                .title("Your milestone is due soon")
+                .body("Hey — your milestone is due in 2 days.")
+                .metadata(Map.of("tier", "AMBER", "timezone", "Asia/Kolkata"))
+                .actionUrl("/learn/path/1/module/3")
+                .build();
+
+        when(lifecycleQueueService.enqueue(any())).thenReturn(draftedRow(queueId));
+
+        mockMvc.perform(post("/api/v1/notifications/internal/send-gated")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.queueId").value(queueId.toString()))
+                .andExpect(jsonPath("$.status").value("DRAFTED"));
+    }
+
+    @Test
+    @DisplayName("POST /internal/send-gated - blank sourceService returns 400")
+    void shouldReturn400WhenGatedSourceServiceBlank() throws Exception {
+        InternalSendRequest request = InternalSendRequest.builder()
+                .sourceService("")
+                .studentId("student-1")
+                .notificationType("MILESTONE_DUE_SOON")
+                .title("Title")
+                .body("Body")
+                .build();
+
+        mockMvc.perform(post("/api/v1/notifications/internal/send-gated")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /internal/send-gated - blank studentId returns 400")
+    void shouldReturn400WhenGatedStudentIdBlank() throws Exception {
+        InternalSendRequest request = InternalSendRequest.builder()
+                .sourceService("learning-progress-tracker")
+                .studentId("")
+                .notificationType("MILESTONE_DUE_SOON")
+                .title("Title")
+                .body("Body")
+                .build();
+
+        mockMvc.perform(post("/api/v1/notifications/internal/send-gated")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /internal/send-gated - blank title returns 400")
+    void shouldReturn400WhenGatedTitleBlank() throws Exception {
+        InternalSendRequest request = InternalSendRequest.builder()
+                .sourceService("learning-progress-tracker")
+                .studentId("student-1")
+                .notificationType("MILESTONE_DUE_SOON")
+                .title("")
+                .body("Body")
+                .build();
+
+        mockMvc.perform(post("/api/v1/notifications/internal/send-gated")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /internal/send-gated - null notificationType returns 400")
+    void shouldReturn400WhenGatedNotificationTypeNull() throws Exception {
+        InternalSendRequest request = InternalSendRequest.builder()
+                .sourceService("learning-progress-tracker")
+                .studentId("student-1")
+                .notificationType(null)
+                .title("Title")
+                .body("Body")
+                .build();
+
+        mockMvc.perform(post("/api/v1/notifications/internal/send-gated")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /internal/send-gated - persistence failure returns 500")
+    void shouldReturn500WhenGatedEnqueueThrows() throws Exception {
+        InternalSendRequest request = InternalSendRequest.builder()
+                .sourceService("learning-progress-tracker")
+                .studentId("student-1")
+                .notificationType("MILESTONE_DUE_SOON")
+                .title("Title")
+                .body("Body")
+                .build();
+
+        when(lifecycleQueueService.enqueue(any()))
+                .thenThrow(new RuntimeException("db down"));
+
+        mockMvc.perform(post("/api/v1/notifications/internal/send-gated")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    @DisplayName("AC-9.3 regression: /send and /send-batch remain unaffected by send-gated addition")
+    void existingSendEndpointsStillWorkUnaffected() throws Exception {
+        InternalSendRequest request = new InternalSendRequest(
+                "mentor", "student-123", "MENTOR_REPLIED",
+                "Mentor replied", "Check your session",
+                Map.of(), "/mentor/chat/session-1");
+
+        when(notificationService.sendNotificationInternal(any())).thenReturn(sampleDto());
+
+        mockMvc.perform(post("/api/v1/notifications/internal/send")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.notificationType").value("MENTOR_REPLIED"));
     }
 }

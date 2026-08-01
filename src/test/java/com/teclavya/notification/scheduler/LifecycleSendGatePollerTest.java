@@ -78,6 +78,16 @@ class LifecycleSendGatePollerTest {
     private ContentSafetyVerifier verifier;
     private NsLifecycleFeatureFlags flags;
     private NotificationService notificationService;
+    /**
+     * The unit-tested collaborator: NS-BE-4's actual claim+process business logic now lives on
+     * {@link LifecycleSendGatePollerSteps} (split out of {@link LifecycleSendGatePoller} so
+     * {@code @Transactional} genuinely engages via Spring's AOP proxy in production — see that
+     * class's javadoc). These plain-POJO unit tests exercise the business logic directly against
+     * a real (H2/PostgreSQL-mode) database; the {@code poll()}-level, real-proxy, concurrent-tick
+     * guarantee itself is covered separately by
+     * {@link LifecycleSendGatePollerRealProxyConcurrencyTest}.
+     */
+    private LifecycleSendGatePollerSteps steps;
     private LifecycleSendGatePoller poller;
 
     @BeforeEach
@@ -86,9 +96,10 @@ class LifecycleSendGatePollerTest {
         flags = new NsLifecycleFeatureFlags();
         flags.getSendGate().setEnabled(true);
         notificationService = mock(NotificationService.class);
-        poller = new LifecycleSendGatePoller(
-                repository, new LifecycleQueueServiceImpl(repository), verifier, flags,
+        steps = new LifecycleSendGatePollerSteps(
+                repository, new LifecycleQueueServiceImpl(repository), verifier,
                 preferenceRepository, new QuietHoursEvaluator(), notificationService);
+        poller = new LifecycleSendGatePoller(flags, steps);
     }
 
     // -----------------------------------------------------------------------
@@ -172,7 +183,7 @@ class LifecycleSendGatePollerTest {
         LifecycleMessageReviewQueue row = draftedRow("AMBER");
         when(verifier.verify(anyString(), anyString())).thenReturn(SafetyVerdict.pass("all rules passed"));
 
-        poller.processDrafted();
+        steps.processDrafted();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.APPROVED);
@@ -190,7 +201,7 @@ class LifecycleSendGatePollerTest {
         LifecycleMessageReviewQueue row = draftedRow("AMBER");
         when(verifier.verify(anyString(), anyString())).thenReturn(SafetyVerdict.fail("unknown placeholder"));
 
-        poller.processDrafted();
+        steps.processDrafted();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SAFETY_REJECTED);
@@ -207,7 +218,7 @@ class LifecycleSendGatePollerTest {
                 .thenThrow(new RuntimeException("circuit open"))
                 .thenReturn(SafetyVerdict.pass("all rules passed"));
 
-        poller.processDrafted();
+        steps.processDrafted();
 
         LifecycleMessageReviewQueue reloadedThrowing = repository.findById(throwingRow.getId()).orElseThrow();
         assertThat(reloadedThrowing.getStatus()).isEqualTo(LifecycleMessageStatus.SAFETY_REJECTED);
@@ -250,7 +261,7 @@ class LifecycleSendGatePollerTest {
                 .build());
         when(verifier.verify(anyString(), anyString())).thenReturn(SafetyVerdict.pass("all rules passed"));
 
-        poller.processDrafted();
+        steps.processDrafted();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.VETOED);
@@ -263,7 +274,7 @@ class LifecycleSendGatePollerTest {
         LifecycleMessageReviewQueue row = draftedRow("AMBER");
         when(verifier.verify(anyString(), anyString())).thenReturn(SafetyVerdict.pass("all rules passed"));
 
-        poller.processDrafted();
+        steps.processDrafted();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.APPROVED);
@@ -279,7 +290,7 @@ class LifecycleSendGatePollerTest {
         LifecycleMessageReviewQueue row = draftedRow("RED");
         when(verifier.verify(anyString(), anyString())).thenReturn(SafetyVerdict.pass("all rules passed"));
 
-        poller.processDrafted();
+        steps.processDrafted();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
@@ -297,7 +308,7 @@ class LifecycleSendGatePollerTest {
         when(notificationService.deliver(any(), any(), any(), any(), any(), any()))
                 .thenReturn(null);
 
-        poller.processApprovedForSend();
+        steps.processApprovedForSend();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SENT);
@@ -314,7 +325,7 @@ class LifecycleSendGatePollerTest {
         LifecycleMessageReviewQueue row = approvedRow("AMBER", "UTC");
         quietPreference(row.getStudentId());
 
-        poller.processApprovedForSend();
+        steps.processApprovedForSend();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.DEFERRED);
@@ -328,7 +339,7 @@ class LifecycleSendGatePollerTest {
         LifecycleMessageReviewQueue row = approvedRow("AMBER", "UTC");
         when(notificationService.deliver(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
-        poller.processApprovedForSend();
+        steps.processApprovedForSend();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SENT);
@@ -345,7 +356,7 @@ class LifecycleSendGatePollerTest {
                 .quietHoursEnabled(false)
                 .build());
 
-        poller.processApprovedForSend();
+        steps.processApprovedForSend();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SUPPRESSED);
@@ -365,7 +376,7 @@ class LifecycleSendGatePollerTest {
                 .thenThrow(new RuntimeException("since-invalidated metadata reference"))
                 .thenReturn(null);
 
-        poller.processApprovedForSend();
+        steps.processApprovedForSend();
 
         LifecycleMessageReviewQueue reloadedFailing = repository.findById(failing.getId()).orElseThrow();
         assertThat(reloadedFailing.getStatus()).isEqualTo(LifecycleMessageStatus.APPROVED);
@@ -385,7 +396,7 @@ class LifecycleSendGatePollerTest {
         notQuietPreference(row.getStudentId());
         when(notificationService.deliver(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
-        poller.processDueDeferrals();
+        steps.processDueDeferrals();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SENT);
@@ -393,7 +404,7 @@ class LifecycleSendGatePollerTest {
 
         // Idempotency (AC-8.2): draining again finds no DEFERRED rows left; deliver() is not
         // called a second time for the same row.
-        poller.processDueDeferrals();
+        steps.processDueDeferrals();
         verify(notificationService, times(1)).deliver(any(), any(), any(), any(), any(), any());
     }
 
@@ -403,7 +414,7 @@ class LifecycleSendGatePollerTest {
         LifecycleMessageReviewQueue row = deferredRow(Instant.now().minus(1, ChronoUnit.HOURS), "UTC");
         quietPreference(row.getStudentId());
 
-        poller.processDueDeferrals();
+        steps.processDueDeferrals();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.DEFERRED);
@@ -421,7 +432,7 @@ class LifecycleSendGatePollerTest {
                 .quietHoursEnabled(false)
                 .build());
 
-        poller.processDueDeferrals();
+        steps.processDueDeferrals();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SUPPRESSED);
@@ -434,7 +445,7 @@ class LifecycleSendGatePollerTest {
     void deferralNotYetDue_notClaimed() {
         LifecycleMessageReviewQueue row = deferredRow(Instant.now().plus(1, ChronoUnit.HOURS), "UTC");
 
-        poller.processDueDeferrals();
+        steps.processDueDeferrals();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.DEFERRED);
@@ -450,7 +461,7 @@ class LifecycleSendGatePollerTest {
     void expiredVetoWindowAmber_autoApproved() {
         LifecycleMessageReviewQueue row = awaitingVetoRow("AMBER", Instant.now().minus(10, ChronoUnit.MINUTES));
 
-        poller.processExpiredVetoWindows();
+        steps.processExpiredVetoWindows();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.APPROVED);
@@ -461,7 +472,7 @@ class LifecycleSendGatePollerTest {
     void expiredVetoWindowRed_leftUntouched() {
         LifecycleMessageReviewQueue row = awaitingVetoRow("RED", Instant.now().minus(10, ChronoUnit.MINUTES));
 
-        poller.processExpiredVetoWindows();
+        steps.processExpiredVetoWindows();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
@@ -472,7 +483,7 @@ class LifecycleSendGatePollerTest {
     void expiredVetoWindowNotYetExpired_notClaimed() {
         LifecycleMessageReviewQueue row = awaitingVetoRow("AMBER", Instant.now().plus(10, ChronoUnit.MINUTES));
 
-        poller.processExpiredVetoWindows();
+        steps.processExpiredVetoWindows();
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
@@ -523,6 +534,19 @@ class LifecycleSendGatePollerTest {
      * open its own real, independently-committed transaction against the shared H2 (PostgreSQL
      * mode) database — required to genuinely exercise {@code FOR UPDATE SKIP LOCKED} row
      * contention between two concurrent {@code processDrafted()} calls.
+     *
+     * <p><b>Scope note:</b> this is a lower-level test of the REPOSITORY claim query's
+     * {@code SKIP LOCKED} contention behavior only — it externally supplies a
+     * {@link TransactionTemplate} around a plain-POJO {@code steps} instance (no Spring AOP
+     * proxy in play), so it proves the SQL-level locking semantics but does NOT prove
+     * production's actual transaction boundary is engaged (that requires calling through a
+     * real proxied bean). The real-proxy, real-boundary guarantee — that
+     * {@link LifecycleSendGatePoller#poll()} itself, called via its actual Spring proxy with
+     * NO externally-supplied transaction, holds the row lock for the whole claim+process
+     * batch — is covered by {@link LifecycleSendGatePollerRealProxyConcurrencyTest}, which is the test
+     * that would have failed against the old self-invoking {@code poll()} and passes only
+     * because {@code poll()} now calls through the separate {@link LifecycleSendGatePollerSteps}
+     * bean's proxy.
      */
     @Nested
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -537,7 +561,7 @@ class LifecycleSendGatePollerTest {
         }
 
         @Test
-        @DisplayName("two concurrent processDrafted() calls never double-approve the same row (SKIP LOCKED)")
+        @DisplayName("repository-level: two concurrent processDrafted() calls never double-approve the same row (SKIP LOCKED)")
         void concurrentPollers_oneWinsPerRow() throws InterruptedException {
             when(verifier.verify(anyString(), anyString())).thenReturn(SafetyVerdict.pass("all rules passed"));
 
@@ -560,7 +584,7 @@ class LifecycleSendGatePollerTest {
                     Thread.currentThread().interrupt();
                 }
                 try {
-                    txTemplate.executeWithoutResult(status -> poller.processDrafted());
+                    txTemplate.executeWithoutResult(status -> steps.processDrafted());
                 } catch (Exception ex) {
                     errors.incrementAndGet();
                 }

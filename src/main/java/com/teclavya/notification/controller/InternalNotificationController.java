@@ -49,7 +49,14 @@ public class InternalNotificationController {
             @RequestBody @Valid InternalSendRequest request) {
         log.info("Gated internal notification from service='{}' for student='{}'",
                 request.getSourceService(), request.getStudentId());
-        LifecycleMessageReviewQueue queued = lifecycleQueueService.enqueue(request);
+        LifecycleMessageReviewQueue queued;
+        try {
+            queued = lifecycleQueueService.enqueue(request);
+        } catch (RuntimeException e) {
+            log.error("Failed to enqueue gated notification for student='{}': {}",
+                    request.getStudentId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).<GatedSendResponse>build();
+        }
         GatedSendResponse response = GatedSendResponse.builder()
                 .queueId(queued.getId().toString())
                 .status(queued.getStatus().name())

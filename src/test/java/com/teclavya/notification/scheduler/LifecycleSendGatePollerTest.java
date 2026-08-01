@@ -10,6 +10,8 @@ import com.teclavya.notification.lifecycle.service.impl.LifecycleQueueServiceImp
 import com.teclavya.notification.lifecycle.verifier.ContentSafetyVerifier;
 import com.teclavya.notification.lifecycle.verifier.SafetyVerdict;
 import com.teclavya.notification.repo.NotificationPreferenceRepository;
+import com.teclavya.notification.service.NotificationService;
+import com.teclavya.notification.service.QuietHoursEvaluator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +27,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,14 +42,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Integration tests (NS-BE-4a) for {@link LifecycleSendGatePoller} step A (verify → approve),
- * against a real (H2/PostgreSQL-mode) database — same {@code @DataJpaTest} infra as
- * {@link com.teclavya.notification.lifecycle.LifecycleMessageReviewQueueRepositoryTest} and
- * {@link com.teclavya.notification.lifecycle.GatedSendEnqueueIntegrationTest}, per this repo's
- * existing convention.
+ * Integration tests (NS-BE-4a/NS-BE-4b) for {@link LifecycleSendGatePoller} — step A
+ * (verify → approve, NS-BE-4a) and steps B/C/D (send/defer, deferral drain, expired-veto-window
+ * backlog, NS-BE-4b) — against a real (H2/PostgreSQL-mode) database — same {@code @DataJpaTest}
+ * infra as {@link com.teclavya.notification.lifecycle.LifecycleMessageReviewQueueRepositoryTest}
+ * and {@link com.teclavya.notification.lifecycle.GatedSendEnqueueIntegrationTest}, per this
+ * repo's existing convention.
  */
 @DataJpaTest
 @ActiveProfiles("test")
@@ -70,6 +77,7 @@ class LifecycleSendGatePollerTest {
 
     private ContentSafetyVerifier verifier;
     private NsLifecycleFeatureFlags flags;
+    private NotificationService notificationService;
     private LifecycleSendGatePoller poller;
 
     @BeforeEach
@@ -77,8 +85,10 @@ class LifecycleSendGatePollerTest {
         verifier = mock(ContentSafetyVerifier.class);
         flags = new NsLifecycleFeatureFlags();
         flags.getSendGate().setEnabled(true);
+        notificationService = mock(NotificationService.class);
         poller = new LifecycleSendGatePoller(
-                repository, new LifecycleQueueServiceImpl(repository), verifier, flags, preferenceRepository);
+                repository, new LifecycleQueueServiceImpl(repository), verifier, flags,
+                preferenceRepository, new QuietHoursEvaluator(), notificationService);
     }
 
     // -----------------------------------------------------------------------
@@ -92,6 +102,63 @@ class LifecycleSendGatePollerTest {
                 .messageBody("Hey {studentName} — your milestone is due in {daysUntilDue} days.")
                 .status(LifecycleMessageStatus.DRAFTED)
                 .tier(tier)
+                .build());
+    }
+
+    private LifecycleMessageReviewQueue approvedRow(String tier, String timezone) {
+        return repository.save(LifecycleMessageReviewQueue.builder()
+                .studentId("student-" + UUID.randomUUID())
+                .notificationType("MILESTONE_DUE_SOON")
+                .messageBody("Hey {studentName} — your milestone is due in {daysUntilDue} days.")
+                .status(LifecycleMessageStatus.APPROVED)
+                .tier(tier)
+                .safetyVerdict("PASS")
+                .timezone(timezone)
+                .build());
+    }
+
+    private LifecycleMessageReviewQueue deferredRow(Instant deferredUntil, String timezone) {
+        return repository.save(LifecycleMessageReviewQueue.builder()
+                .studentId("student-" + UUID.randomUUID())
+                .notificationType("MILESTONE_DUE_SOON")
+                .messageBody("Hey {studentName} — your milestone is due in {daysUntilDue} days.")
+                .status(LifecycleMessageStatus.DEFERRED)
+                .tier("AMBER")
+                .safetyVerdict("PASS")
+                .deferredUntil(deferredUntil)
+                .timezone(timezone)
+                .build());
+    }
+
+    private LifecycleMessageReviewQueue awaitingVetoRow(String tier, Instant vetoWindowExpiresAt) {
+        return repository.save(LifecycleMessageReviewQueue.builder()
+                .studentId("student-" + UUID.randomUUID())
+                .notificationType("MILESTONE_DUE_SOON")
+                .messageBody("Hey {studentName} — your milestone is due in {daysUntilDue} days.")
+                .status(LifecycleMessageStatus.AWAITING_VETO_WINDOW)
+                .tier(tier)
+                .safetyVerdict("PASS")
+                .vetoWindowExpiresAt(vetoWindowExpiresAt)
+                .build());
+    }
+
+    /** A preference row that is always NOT quiet (start==end degenerate window is "always quiet" —
+     * per {@link QuietHoursEvaluator}, so instead disable quiet hours entirely for "not quiet" fixtures). */
+    private NotificationPreference notQuietPreference(String studentId) {
+        return preferenceRepository.save(NotificationPreference.builder()
+                .studentId(studentId)
+                .notificationType(NotificationType.MILESTONE_DUE_SOON)
+                .quietHoursEnabled(false)
+                .build());
+    }
+
+    private NotificationPreference quietPreference(String studentId) {
+        return preferenceRepository.save(NotificationPreference.builder()
+                .studentId(studentId)
+                .notificationType(NotificationType.MILESTONE_DUE_SOON)
+                .quietHoursEnabled(true)
+                .quietHoursStart(0)
+                .quietHoursEnd(0) // start==end => "always quiet" per QuietHoursEvaluator
                 .build());
     }
 
@@ -216,6 +283,235 @@ class LifecycleSendGatePollerTest {
 
         LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
+    }
+
+    // =========================================================================
+    // NS-BE-4b — step B (send/defer)
+    // =========================================================================
+
+    @Test
+    @DisplayName("processApprovedForSend: not quiet, not opted out -> deliver + SENT")
+    void approvedNotQuietNotOptedOut_deliversAndMarksSent() {
+        LifecycleMessageReviewQueue row = approvedRow("AMBER", "UTC");
+        notQuietPreference(row.getStudentId());
+        when(notificationService.deliver(any(), any(), any(), any(), any(), any()))
+                .thenReturn(null);
+
+        poller.processApprovedForSend();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SENT);
+        assertThat(reloaded.getSentAt()).isNotNull();
+        verify(notificationService, times(1)).deliver(
+                org.mockito.ArgumentMatchers.eq(row.getStudentId()),
+                org.mockito.ArgumentMatchers.eq(NotificationType.MILESTONE_DUE_SOON),
+                any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("processApprovedForSend: in quiet hours -> DEFERRED, no delivery")
+    void approvedInQuietHours_defersWithoutDelivery() {
+        LifecycleMessageReviewQueue row = approvedRow("AMBER", "UTC");
+        quietPreference(row.getStudentId());
+
+        poller.processApprovedForSend();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.DEFERRED);
+        assertThat(reloaded.getDeferredUntil()).isNotNull();
+        org.mockito.Mockito.verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    @DisplayName("processApprovedForSend: no preference row -> not quiet -> delivered any time (Edge-Case)")
+    void approvedNoPreferenceRow_deliveredAnyTime() {
+        LifecycleMessageReviewQueue row = approvedRow("AMBER", "UTC");
+        when(notificationService.deliver(any(), any(), any(), any(), any(), any())).thenReturn(null);
+
+        poller.processApprovedForSend();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SENT);
+    }
+
+    @Test
+    @DisplayName("processApprovedForSend: opted-out mid-flight (post-approve) -> SUPPRESSED, never delivered (Edge-Case)")
+    void approvedOptedOutMidFlight_suppressedNeverDelivered() {
+        LifecycleMessageReviewQueue row = approvedRow("AMBER", "UTC");
+        preferenceRepository.save(NotificationPreference.builder()
+                .studentId(row.getStudentId())
+                .notificationType(NotificationType.MILESTONE_DUE_SOON)
+                .inAppEnabled(false)
+                .quietHoursEnabled(false)
+                .build());
+
+        poller.processApprovedForSend();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SUPPRESSED);
+        assertThat(reloaded.getVetoReason()).isEqualTo("opt-out");
+        org.mockito.Mockito.verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    @DisplayName("processApprovedForSend: delivery failure -> row left APPROVED (not SENT), other rows still process (Edge-Case graceful skip)")
+    void deliveryFailure_skipsRowGracefullyBatchContinues() {
+        LifecycleMessageReviewQueue failing = approvedRow("AMBER", "UTC");
+        LifecycleMessageReviewQueue healthy = approvedRow("AMBER", "UTC");
+        notQuietPreference(failing.getStudentId());
+        notQuietPreference(healthy.getStudentId());
+
+        when(notificationService.deliver(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("since-invalidated metadata reference"))
+                .thenReturn(null);
+
+        poller.processApprovedForSend();
+
+        LifecycleMessageReviewQueue reloadedFailing = repository.findById(failing.getId()).orElseThrow();
+        assertThat(reloadedFailing.getStatus()).isEqualTo(LifecycleMessageStatus.APPROVED);
+
+        LifecycleMessageReviewQueue reloadedHealthy = repository.findById(healthy.getId()).orElseThrow();
+        assertThat(reloadedHealthy.getStatus()).isEqualTo(LifecycleMessageStatus.SENT);
+    }
+
+    // =========================================================================
+    // NS-BE-4b — step C (deferral drain)
+    // =========================================================================
+
+    @Test
+    @DisplayName("processDueDeferrals: DEFERRED past due, no longer quiet -> deliver + SENT once (AC-7.2/7.3)")
+    void dueDeferral_drainsToSentOnce() {
+        LifecycleMessageReviewQueue row = deferredRow(Instant.now().minus(1, ChronoUnit.HOURS), "UTC");
+        notQuietPreference(row.getStudentId());
+        when(notificationService.deliver(any(), any(), any(), any(), any(), any())).thenReturn(null);
+
+        poller.processDueDeferrals();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SENT);
+        verify(notificationService, times(1)).deliver(any(), any(), any(), any(), any(), any());
+
+        // Idempotency (AC-8.2): draining again finds no DEFERRED rows left; deliver() is not
+        // called a second time for the same row.
+        poller.processDueDeferrals();
+        verify(notificationService, times(1)).deliver(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("processDueDeferrals: still quiet on drain (window shifted) -> left DEFERRED, no delivery")
+    void dueDeferralStillQuiet_leftDeferred() {
+        LifecycleMessageReviewQueue row = deferredRow(Instant.now().minus(1, ChronoUnit.HOURS), "UTC");
+        quietPreference(row.getStudentId());
+
+        poller.processDueDeferrals();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.DEFERRED);
+        org.mockito.Mockito.verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    @DisplayName("processDueDeferrals: opted-out mid-flight during defer -> SUPPRESSED, never delivered (Edge-Case)")
+    void deferredOptedOutMidFlight_suppressedNeverDelivered() {
+        LifecycleMessageReviewQueue row = deferredRow(Instant.now().minus(1, ChronoUnit.HOURS), "UTC");
+        preferenceRepository.save(NotificationPreference.builder()
+                .studentId(row.getStudentId())
+                .notificationType(NotificationType.MILESTONE_DUE_SOON)
+                .inAppEnabled(false)
+                .quietHoursEnabled(false)
+                .build());
+
+        poller.processDueDeferrals();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SUPPRESSED);
+        assertThat(reloaded.getVetoReason()).isEqualTo("opt-out");
+        org.mockito.Mockito.verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    @DisplayName("processDueDeferrals: not-yet-due DEFERRED row is not claimed")
+    void deferralNotYetDue_notClaimed() {
+        LifecycleMessageReviewQueue row = deferredRow(Instant.now().plus(1, ChronoUnit.HOURS), "UTC");
+
+        poller.processDueDeferrals();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.DEFERRED);
+        org.mockito.Mockito.verifyNoInteractions(notificationService);
+    }
+
+    // =========================================================================
+    // NS-BE-4b — step D (expired veto window backlog / RED safety net, ADR-10)
+    // =========================================================================
+
+    @Test
+    @DisplayName("processExpiredVetoWindows: AMBER row past expiry -> auto-approved")
+    void expiredVetoWindowAmber_autoApproved() {
+        LifecycleMessageReviewQueue row = awaitingVetoRow("AMBER", Instant.now().minus(10, ChronoUnit.MINUTES));
+
+        poller.processExpiredVetoWindows();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.APPROVED);
+    }
+
+    @Test
+    @DisplayName("processExpiredVetoWindows: RED row past expiry -> left untouched (P2/out-of-scope)")
+    void expiredVetoWindowRed_leftUntouched() {
+        LifecycleMessageReviewQueue row = awaitingVetoRow("RED", Instant.now().minus(10, ChronoUnit.MINUTES));
+
+        poller.processExpiredVetoWindows();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
+    }
+
+    @Test
+    @DisplayName("processExpiredVetoWindows: not-yet-expired row is not claimed")
+    void expiredVetoWindowNotYetExpired_notClaimed() {
+        LifecycleMessageReviewQueue row = awaitingVetoRow("AMBER", Instant.now().plus(10, ChronoUnit.MINUTES));
+
+        poller.processExpiredVetoWindows();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.AWAITING_VETO_WINDOW);
+    }
+
+    // =========================================================================
+    // NS-BE-4b — full walk + opt-out-at-approve regression (AC-7.1)
+    // =========================================================================
+
+    @Test
+    @DisplayName("full walk: DRAFTED -> verify/approve -> send -> SENT within one poll() when never quiet/opted-out")
+    void fullWalk_draftedToSentInOnePoll() {
+        LifecycleMessageReviewQueue row = draftedRow("AMBER");
+        notQuietPreference(row.getStudentId());
+        when(verifier.verify(anyString(), anyString())).thenReturn(SafetyVerdict.pass("all rules passed"));
+        when(notificationService.deliver(any(), any(), any(), any(), any(), any())).thenReturn(null);
+
+        poller.poll();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.SENT);
+    }
+
+    @Test
+    @DisplayName("AC-7.1 regression: opt-out at approve (pre-approve, via existing veto path) still never reaches APPROVED after NS-BE-4b's poll() wiring")
+    void ac71Regression_optOutAtApproveViaFullPoll() {
+        LifecycleMessageReviewQueue row = draftedRow("AMBER");
+        preferenceRepository.save(NotificationPreference.builder()
+                .studentId(row.getStudentId())
+                .notificationType(NotificationType.MILESTONE_DUE_SOON)
+                .inAppEnabled(false)
+                .build());
+        when(verifier.verify(anyString(), anyString())).thenReturn(SafetyVerdict.pass("all rules passed"));
+
+        poller.poll();
+
+        LifecycleMessageReviewQueue reloaded = repository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(LifecycleMessageStatus.VETOED);
+        org.mockito.Mockito.verifyNoInteractions(notificationService);
     }
 
     // -----------------------------------------------------------------------

@@ -133,4 +133,45 @@ class NotificationServiceImplTest {
         NotificationDto result = service.sendNotificationInternal(request);
         assertThat(result).isNotNull();
     }
+
+    // -----------------------------------------------------------------------
+    // deliver() extraction parity (NS-BE-4b, AC-9.3) — sendNotificationInternal must exhibit
+    // byte-identical save+publish behaviour after delegating to the new deliver() primitive.
+    // -----------------------------------------------------------------------
+
+    @Test
+    @DisplayName("deliver() parity: sendNotificationInternal saves + publishes exactly as before the extraction")
+    void deliverExtraction_sendNotificationInternalParity() {
+        when(notificationRepository.save(any())).thenReturn(savedNotification());
+
+        InternalSendRequest request = new InternalSendRequest(
+                "mentor", "student-123", "MENTOR_REPLIED",
+                "Mentor replied", "Check session", Map.of(), "/mentor/1");
+
+        NotificationDto result = service.sendNotificationInternal(request);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getNotificationType()).isEqualTo("MENTOR_REPLIED");
+        assertThat(result.getChannel()).isEqualTo("IN_APP");
+        assertThat(result.getActionUrl()).isEqualTo("/mentor/1");
+        verify(notificationRepository, times(1)).save(any());
+        verify(notificationPublisher, times(1)).publishToWebSocket(any(), eq("student-123"));
+    }
+
+    @Test
+    @DisplayName("deliver() called directly (LifecycleSendGatePoller path) exhibits the same save+publish behaviour")
+    void deliverCalledDirectly_sameSaveAndPublishBehaviour() {
+        when(notificationRepository.save(any())).thenReturn(savedNotification());
+
+        NotificationDto result = service.deliver(
+                "student-123", NotificationType.MENTOR_REPLIED, "Mentor replied", "Check session",
+                Map.of(), "/mentor/1");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getNotificationType()).isEqualTo("MENTOR_REPLIED");
+        assertThat(result.getChannel()).isEqualTo("IN_APP");
+        assertThat(result.getActionUrl()).isEqualTo("/mentor/1");
+        verify(notificationRepository, times(1)).save(any());
+        verify(notificationPublisher, times(1)).publishToWebSocket(any(), eq("student-123"));
+    }
 }

@@ -52,4 +52,37 @@ public interface LifecycleMessageReviewQueueRepository
             + "WHERE status = 'DRAFTED' ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED",
             nativeQuery = true)
     List<LifecycleMessageReviewQueue> claimDraftedBatch(@Param("limit") int limit);
+
+    /**
+     * LifecycleSendGatePoller step B (NS-BE-4b): claims up to {@code limit} APPROVED rows for
+     * the quiet-hours check + delivery step. SKIP LOCKED — see {@link #claimDraftedBatch(int)}.
+     */
+    @Query(value = "SELECT * FROM lifecycle_message_review_queue "
+            + "WHERE status = 'APPROVED' ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED",
+            nativeQuery = true)
+    List<LifecycleMessageReviewQueue> claimApprovedBatch(@Param("limit") int limit);
+
+    /**
+     * LifecycleSendGatePoller step C (NS-BE-4b): claims up to {@code limit} DEFERRED rows whose
+     * {@code deferred_until} has elapsed (quiet-hours drain). SKIP LOCKED — see
+     * {@link #claimDraftedBatch(int)}.
+     */
+    @Query(value = "SELECT * FROM lifecycle_message_review_queue "
+            + "WHERE status = 'DEFERRED' AND deferred_until < :threshold "
+            + "ORDER BY deferred_until ASC LIMIT :limit FOR UPDATE SKIP LOCKED",
+            nativeQuery = true)
+    List<LifecycleMessageReviewQueue> claimDueDeferralsBatch(
+            @Param("threshold") Instant threshold, @Param("limit") int limit);
+
+    /**
+     * LifecycleSendGatePoller step D (NS-BE-4b): claims up to {@code limit} AWAITING_VETO_WINDOW
+     * rows whose veto window has expired — backlog/RED safety net (design §7, ADR-10). SKIP
+     * LOCKED — see {@link #claimDraftedBatch(int)}.
+     */
+    @Query(value = "SELECT * FROM lifecycle_message_review_queue "
+            + "WHERE status = 'AWAITING_VETO_WINDOW' AND veto_window_expires_at < :threshold "
+            + "ORDER BY veto_window_expires_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED",
+            nativeQuery = true)
+    List<LifecycleMessageReviewQueue> claimExpiredVetoWindowBatch(
+            @Param("threshold") Instant threshold, @Param("limit") int limit);
 }

@@ -86,6 +86,15 @@ public interface LifecycleQueueService {
      */
     LifecycleMessageReviewQueue markDeferred(UUID id, Instant deferredUntil);
 
+    /**
+     * Withholds a message from send entirely (terminal state).
+     * Sets status=SUPPRESSED (reusing the veto_reason column to record why).
+     * Guard: only from APPROVED or DEFERRED; otherwise IllegalStateException.
+     * SUPPRESSED is terminal — a suppressed row is never reachable from SENT and must never be
+     * counted by any "messages sent" query/metric.
+     */
+    LifecycleMessageReviewQueue markSuppressed(UUID id, String reason);
+
     /** Returns all APPROVED rows — feed for the send poller. */
     List<LifecycleMessageReviewQueue> findDueForSend();
 

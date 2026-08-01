@@ -261,6 +261,28 @@ public class LifecycleQueueServiceImpl implements LifecycleQueueService {
     }
 
     // ------------------------------------------------------------------
+    // markSuppressed
+    // ------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public LifecycleMessageReviewQueue markSuppressed(UUID id, String reason) {
+        LifecycleMessageReviewQueue row = load(id);
+
+        if (row.getStatus() != LifecycleMessageStatus.APPROVED
+                && row.getStatus() != LifecycleMessageStatus.DEFERRED) {
+            throw new IllegalStateException(
+                    "Cannot suppress message in state " + row.getStatus() +
+                    " (id=" + id + "). Only APPROVED or DEFERRED messages may be suppressed.");
+        }
+
+        row.setStatus(LifecycleMessageStatus.SUPPRESSED);
+        row.setVetoReason(reason);
+        log.debug("Suppressed id={} reason={}", id, reason);
+        return repository.save(row);
+    }
+
+    // ------------------------------------------------------------------
     // Query helpers
     // ------------------------------------------------------------------
 

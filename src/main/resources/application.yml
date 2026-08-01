@@ -31,6 +31,15 @@ internal:
   service:
     token: ${INTERNAL_SERVICE_TOKEN:}
 
+# Learning-journey ethical send-gate poller (NS-BE-4a, design.md §10, ADR-8/ADR-10).
+# Default false — ship dark; OFF means the endpoint still accepts+enqueues /send-gated
+# requests (rows sit at DRAFTED) but the poller never verifies/approves/sends (AC-10.2).
+feature:
+  flags:
+    lifecycle:
+      send-gate:
+        enabled: ${FF_LIFECYCLE_SEND_GATE_ENABLED:false}
+
 # Resilience4j — content-safety verifier circuit-breaker + time-limiter (BE-3)
 resilience4j:
   circuitbreaker:

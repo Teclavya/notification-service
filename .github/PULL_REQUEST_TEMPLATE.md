@@ -8,7 +8,7 @@
 - [ ] Infrastructure: <!-- e.g., deployment scripts, Docker, Nginx -->
 
 ## Test Plan
-- [ ] P0+P1 tests passing locally (`mvn verify -Dgroups="p0,p1"` / `npx vitest run --testNamePattern="\\[P[01]\\]"`)
+- [ ] Full test suite passing locally in Docker (`mvn verify` — whole surefire+failsafe suite; do NOT add `-Dgroups`, which selects 0 tagged tests and false-greens)
 - [ ] New tests added for new functionality
 - [ ] Manual verification steps (if applicable): <!-- describe steps -->
 

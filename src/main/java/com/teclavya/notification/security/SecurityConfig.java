@@ -25,6 +25,7 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers("/api/v1/notifications/internal/**").permitAll()
                 .requestMatchers("/api/v1/notifications/email").permitAll() // internal token auth handled in controller
+                .requestMatchers("/ws/**", "/sockjs/**").permitAll() // WebSocket & SockJS info handshake
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);

@@ -74,6 +74,9 @@ class LifecycleSendGatePollerRealProxyConcurrencyTest {
     @MockBean
     private NotificationService notificationService;
 
+    @MockBean
+    private com.teclavya.notification.lifecycle.analytics.LifecycleEventEmitter lifecycleEventEmitter;
+
     @BeforeEach
     void setUp() {
         repository.deleteAll();

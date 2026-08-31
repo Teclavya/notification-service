@@ -10,6 +10,7 @@ import com.teclavya.notification.lifecycle.verifier.SafetyVerdict;
 import com.teclavya.notification.repo.NotificationPreferenceRepository;
 import com.teclavya.notification.service.NotificationService;
 import com.teclavya.notification.service.QuietHoursEvaluator;
+import com.teclavya.notification.lifecycle.analytics.LifecycleEventEmitter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -68,6 +69,7 @@ public class LifecycleSendGatePollerSteps {
     private final NotificationPreferenceRepository preferenceRepository;
     private final QuietHoursEvaluator quietHoursEvaluator;
     private final NotificationService notificationService;
+    private final LifecycleEventEmitter lifecycleEventEmitter;
 
     // ------------------------------------------------------------------
     // Step A — DRAFTED: verify → approve
@@ -94,10 +96,13 @@ public class LifecycleSendGatePollerSteps {
 
         lifecycleQueueService.applyVerdict(id, verdict.pass(), verdict.details());
         if (!verdict.pass()) {
+            lifecycleEventEmitter.emitSafetyRejected(row.getStudentId(), id, verdict.details());
+            lifecycleEventEmitter.emitSendBlocked(row.getStudentId(), id, "SAFETY_REJECTED");
             log.info("Lifecycle send-gate: id={} SAFETY_REJECTED — {}", id, verdict.details());
             return;
         }
 
+        lifecycleEventEmitter.emitSafetyChecked(row.getStudentId(), id);
         lifecycleQueueService.openVetoWindow(id);
 
         if (!TIER_AMBER.equalsIgnoreCase(row.getTier())) {
@@ -108,11 +113,13 @@ public class LifecycleSendGatePollerSteps {
 
         if (isOptedOut(row)) {
             lifecycleQueueService.veto(id, SUPPRESS_REASON_OPT_OUT);
+            lifecycleEventEmitter.emitVetoed(row.getStudentId(), id, SUPPRESS_REASON_OPT_OUT);
             log.info("Lifecycle send-gate: id={} VETOED (opt-out at approve)", id);
             return;
         }
 
         lifecycleQueueService.approve(id);
+        lifecycleEventEmitter.emitApproved(row.getStudentId(), id);
         log.info("Lifecycle send-gate: id={} APPROVED (AMBER, veto-window=0)", id);
     }
 
@@ -155,6 +162,7 @@ public class LifecycleSendGatePollerSteps {
         if (quietHoursEvaluator.isQuiet(pref, row.getTimezone(), Instant.now())) {
             Instant nextWindowOpen = computeNextWindowOpen(pref, row.getTimezone());
             lifecycleQueueService.markDeferred(id, nextWindowOpen);
+            lifecycleEventEmitter.emitDeferred(row.getStudentId(), id, nextWindowOpen.toString());
             log.info("Lifecycle send-gate: id={} DEFERRED until={} (quiet hours)", id, nextWindowOpen);
             return;
         }
@@ -162,6 +170,7 @@ public class LifecycleSendGatePollerSteps {
         if (isOptedOutValue(pref)) {
             // Mid-flight opt-out (post-approve, Edge-Case): never delivered.
             lifecycleQueueService.markSuppressed(id, SUPPRESS_REASON_OPT_OUT);
+            lifecycleEventEmitter.emitVetoed(row.getStudentId(), id, SUPPRESS_REASON_OPT_OUT);
             log.info("Lifecycle send-gate: id={} SUPPRESSED (opt-out mid-flight)", id);
             return;
         }
@@ -200,6 +209,7 @@ public class LifecycleSendGatePollerSteps {
 
         if (isOptedOutValue(pref)) {
             lifecycleQueueService.markSuppressed(id, SUPPRESS_REASON_OPT_OUT);
+            lifecycleEventEmitter.emitVetoed(row.getStudentId(), id, SUPPRESS_REASON_OPT_OUT);
             log.info("Lifecycle send-gate: id={} SUPPRESSED (opt-out mid-flight, deferral drain)", id);
             return;
         }
@@ -236,11 +246,13 @@ public class LifecycleSendGatePollerSteps {
 
         if (isOptedOut(row)) {
             lifecycleQueueService.veto(id, SUPPRESS_REASON_OPT_OUT);
+            lifecycleEventEmitter.emitVetoed(row.getStudentId(), id, SUPPRESS_REASON_OPT_OUT);
             log.info("Lifecycle send-gate: id={} VETOED (opt-out, expired-veto-window backlog)", id);
             return;
         }
 
         lifecycleQueueService.approve(id);
+        lifecycleEventEmitter.emitApproved(row.getStudentId(), id);
         log.info("Lifecycle send-gate: id={} APPROVED (AMBER, expired-veto-window backlog)", id);
     }
 
@@ -268,6 +280,7 @@ public class LifecycleSendGatePollerSteps {
                 row.getStudentId(), type, deriveTitle(type), row.getMessageBody(),
                 metadata, extractActionUrl(metadata));
         lifecycleQueueService.markSent(row.getId());
+        lifecycleEventEmitter.emitSent(row.getStudentId(), row.getId());
         log.info("Lifecycle send-gate: id={} SENT", row.getId());
     }
 

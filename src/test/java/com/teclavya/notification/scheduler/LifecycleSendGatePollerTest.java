@@ -12,6 +12,7 @@ import com.teclavya.notification.lifecycle.verifier.SafetyVerdict;
 import com.teclavya.notification.repo.NotificationPreferenceRepository;
 import com.teclavya.notification.service.NotificationService;
 import com.teclavya.notification.service.QuietHoursEvaluator;
+import com.teclavya.notification.lifecycle.analytics.LifecycleEventEmitter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -76,17 +77,9 @@ class LifecycleSendGatePollerTest {
     private NotificationPreferenceRepository preferenceRepository;
 
     private ContentSafetyVerifier verifier;
-    private NsLifecycleFeatureFlags flags;
     private NotificationService notificationService;
-    /**
-     * The unit-tested collaborator: NS-BE-4's actual claim+process business logic now lives on
-     * {@link LifecycleSendGatePollerSteps} (split out of {@link LifecycleSendGatePoller} so
-     * {@code @Transactional} genuinely engages via Spring's AOP proxy in production — see that
-     * class's javadoc). These plain-POJO unit tests exercise the business logic directly against
-     * a real (H2/PostgreSQL-mode) database; the {@code poll()}-level, real-proxy, concurrent-tick
-     * guarantee itself is covered separately by
-     * {@link LifecycleSendGatePollerRealProxyConcurrencyTest}.
-     */
+    private LifecycleEventEmitter lifecycleEventEmitter;
+    private NsLifecycleFeatureFlags flags;
     private LifecycleSendGatePollerSteps steps;
     private LifecycleSendGatePoller poller;
 
@@ -96,9 +89,10 @@ class LifecycleSendGatePollerTest {
         flags = new NsLifecycleFeatureFlags();
         flags.getSendGate().setEnabled(true);
         notificationService = mock(NotificationService.class);
+        lifecycleEventEmitter = mock(LifecycleEventEmitter.class);
         steps = new LifecycleSendGatePollerSteps(
                 repository, new LifecycleQueueServiceImpl(repository), verifier,
-                preferenceRepository, new QuietHoursEvaluator(), notificationService);
+                preferenceRepository, new QuietHoursEvaluator(), notificationService, lifecycleEventEmitter);
         poller = new LifecycleSendGatePoller(flags, steps);
     }
 

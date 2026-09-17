@@ -39,4 +39,9 @@ public class SendEmailRequest {
      * For {@code "cohort-invite"}: expects keys {@code cohortName} and {@code acceptUrl}.
      */
     private Map<String, String> params;
+
+    /**
+     * Optional caller-supplied idempotency key (prevents double-send on retry).
+     */
+    private String idempotencyKey;
 }

@@ -73,20 +73,24 @@ class NotificationControllerEmailTest {
     @MockBean
     private JwtUtil jwtUtil;
 
+    @MockBean
+    private com.teclavya.notification.service.SuppressionService suppressionService;
+
+    @MockBean
+    private com.teclavya.notification.service.EmailSendAuditService emailSendAuditService;
+
     private SendEmailRequest validRequest() {
         return SendEmailRequest.builder()
                 .to("friend@example.com")
                 .subject("You're invited to join TestCohort cohort on Teclavya")
                 .templateId("cohort-invite")
-                .params(Map.of(
-                        "cohortName", "TestCohort",
-                        "acceptUrl", "https://teclavya.com/cohorts/invitations/abc123/accept"
-                ))
+                .params(Map.of("cohortName", "TestCohort", "acceptUrl", "https://example.com/join"))
                 .build();
     }
 
     @BeforeEach
     void setUpTemplateRenderer() {
+        when(suppressionService.isSuppressed(any())).thenReturn(false);
         when(emailTemplateRenderer.render(anyString(), anyMap()))
                 .thenReturn("<html><body>You're invited!</body></html>");
     }

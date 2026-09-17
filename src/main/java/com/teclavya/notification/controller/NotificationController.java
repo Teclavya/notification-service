@@ -4,10 +4,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import java.util.Optional;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mail.MailException;
+import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,8 +29,11 @@ import com.teclavya.notification.dto.request.UpdatePreferencesRequest;
 import com.teclavya.notification.dto.response.NotificationDto;
 import com.teclavya.notification.dto.response.NotificationPreferenceDto;
 import com.teclavya.notification.dto.response.SendEmailResponse;
+import com.teclavya.notification.entities.EmailSendEvent;
+import com.teclavya.notification.service.EmailSendAuditService;
 import com.teclavya.notification.service.EmailService;
 import com.teclavya.notification.service.NotificationService;
+import com.teclavya.notification.service.SuppressionService;
 import com.teclavya.notification.service.impl.EmailTemplateRenderer;
 
 import jakarta.validation.Valid;
@@ -44,6 +50,8 @@ public class NotificationController {
     private final NotificationService notificationService;
     private final EmailService emailService;
     private final EmailTemplateRenderer emailTemplateRenderer;
+    private final SuppressionService suppressionService;
+    private final EmailSendAuditService emailSendAuditService;
 
     @Value("${internal.service.token:}")
     private String internalServiceToken;
@@ -51,7 +59,7 @@ public class NotificationController {
     /**
      * Internal service-to-service email endpoint for cohort invite emails.
      * Protected by {@code X-Internal-Token} header (not user JWT).
-     * Returns 202 on success, 401 for missing/invalid token, 500 if SMTP is unconfigured.
+     * Returns 202 on success, 200 on suppression, 401 for missing/invalid token, 500 if SMTP is unconfigured.
      */
     @PostMapping("/email")
     public ResponseEntity<SendEmailResponse> sendEmail(
@@ -61,6 +69,31 @@ public class NotificationController {
         if (internalServiceToken.isBlank() || !internalServiceToken.equals(token)) {
             log.warn("Rejected /email request — invalid or missing X-Internal-Token");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        String idempotencyKey = request.getIdempotencyKey();
+        if (StringUtils.hasText(idempotencyKey)) {
+            Optional<EmailSendEvent> existing = emailSendAuditService.findByIdempotencyKey(idempotencyKey);
+            if (existing.isPresent()) {
+                EmailSendEvent ev = existing.get();
+                if ("SENT".equals(ev.getStatus())) {
+                    log.info("email_idempotency_hit key='{}' to='{}' status=SENT", idempotencyKey, request.getTo());
+                    return ResponseEntity.status(HttpStatus.ACCEPTED)
+                            .body(SendEmailResponse.builder().status("SENT").idempotencyHit(true).build());
+                } else if ("SUPPRESSED".equals(ev.getStatus())) {
+                    log.info("email_idempotency_hit key='{}' to='{}' status=SUPPRESSED", idempotencyKey, request.getTo());
+                    return ResponseEntity.status(HttpStatus.OK)
+                            .body(SendEmailResponse.builder().status("SUPPRESSED").idempotencyHit(true).build());
+                }
+            }
+        }
+
+        if (suppressionService.isSuppressed(request.getTo())) {
+            log.info("email_suppressed to='{}' subject='{}' — blocked by active suppression",
+                    request.getTo(), request.getSubject());
+            emailSendAuditService.recordSuppressed(request.getTo(), request.getSubject(), request.getTemplateId(), idempotencyKey);
+            return ResponseEntity.status(HttpStatus.OK)
+                    .body(SendEmailResponse.builder().status("SUPPRESSED").build());
         }
 
         String templateId = request.getTemplateId();
@@ -75,10 +108,19 @@ public class NotificationController {
             return ResponseEntity.badRequest().<SendEmailResponse>build();
         }
 
+        EmailSendEvent sendEvent = emailSendAuditService.recordPending(
+                request.getTo(), request.getSubject(), templateId, idempotencyKey);
+
         try {
             emailService.sendEmail(request.getTo(), request.getSubject(), htmlBody);
+            emailSendAuditService.recordSent(sendEvent, null);
         } catch (MailException e) {
             log.error("Failed to send email to '{}': {}", request.getTo(), e.getMessage());
+            emailSendAuditService.recordFailed(sendEvent, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).<SendEmailResponse>build();
+        } catch (Exception e) {
+            log.error("Unexpected error sending email to '{}': {}", request.getTo(), e.getMessage());
+            emailSendAuditService.recordFailed(sendEvent, e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).<SendEmailResponse>build();
         }
 

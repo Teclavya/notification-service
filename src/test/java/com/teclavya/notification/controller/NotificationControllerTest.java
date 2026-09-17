@@ -49,6 +49,12 @@ class NotificationControllerTest {
     @MockBean
     private JwtUtil jwtUtil;
 
+    @MockBean
+    private com.teclavya.notification.service.SuppressionService suppressionService;
+
+    @MockBean
+    private com.teclavya.notification.service.EmailSendAuditService emailSendAuditService;
+
     private NotificationDto sampleDto() {
         return NotificationDto.builder()
                 .notificationId("uuid-123")

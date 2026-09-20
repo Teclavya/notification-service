@@ -36,6 +36,9 @@ public enum NotificationType {
     STRUGGLE_INTERVENTION,
     MASTERY_CELEBRATION,
     ONBOARDING_NUDGE,
+    IDLE_48H,
+    IDLE_7D,
+    IDLE_14D,
 
     // Learning-journey ethical send-gate (NS-BE-2)
     MILESTONE_DUE_SOON,

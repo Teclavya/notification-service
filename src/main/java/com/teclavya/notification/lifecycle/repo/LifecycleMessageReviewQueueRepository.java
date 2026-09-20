@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -29,6 +30,21 @@ public interface LifecycleMessageReviewQueueRepository
     List<LifecycleMessageReviewQueue> findByStatus(LifecycleMessageStatus status);
 
     /**
+     * Count rows by status.
+     */
+    long countByStatus(LifecycleMessageStatus status);
+
+    /**
+     * Find most recent row with a given status (e.g. latest VETOED row).
+     */
+    Optional<LifecycleMessageReviewQueue> findTopByStatusOrderByUpdatedAtDesc(LifecycleMessageStatus status);
+
+    /**
+     * Find earliest row created.
+     */
+    Optional<LifecycleMessageReviewQueue> findTopByOrderByCreatedAtAsc();
+
+    /**
      * Poller: deferred rows whose defer window has elapsed.
      */
     List<LifecycleMessageReviewQueue> findByStatusAndDeferredUntilBefore(
@@ -42,11 +58,13 @@ public interface LifecycleMessageReviewQueueRepository
             @Param("status") LifecycleMessageStatus status, Pageable pageable);
 
     /**
+     * Admin list: paginated, all statuses, newest-first.
+     */
+    Page<LifecycleMessageReviewQueue> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    /**
      * LifecycleSendGatePoller step A (NS-BE-4a): claims up to {@code limit} DRAFTED rows for
-     * content-safety verification. {@code FOR UPDATE SKIP LOCKED} means two concurrent poller
-     * instances never claim the same row (design §8, defence-in-depth for prod — staging is
-     * single-instance). Must be called from within an active transaction so the row lock is
-     * held for the duration of the caller's verify+approve work, not just this query.
+     * content-safety verification.
      */
     @Query(value = "SELECT * FROM lifecycle_message_review_queue "
             + "WHERE status = 'DRAFTED' ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED",
@@ -55,7 +73,7 @@ public interface LifecycleMessageReviewQueueRepository
 
     /**
      * LifecycleSendGatePoller step B (NS-BE-4b): claims up to {@code limit} APPROVED rows for
-     * the quiet-hours check + delivery step. SKIP LOCKED — see {@link #claimDraftedBatch(int)}.
+     * the quiet-hours check + delivery step.
      */
     @Query(value = "SELECT * FROM lifecycle_message_review_queue "
             + "WHERE status = 'APPROVED' ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED",
@@ -64,8 +82,7 @@ public interface LifecycleMessageReviewQueueRepository
 
     /**
      * LifecycleSendGatePoller step C (NS-BE-4b): claims up to {@code limit} DEFERRED rows whose
-     * {@code deferred_until} has elapsed (quiet-hours drain). SKIP LOCKED — see
-     * {@link #claimDraftedBatch(int)}.
+     * {@code deferred_until} has elapsed (quiet-hours drain).
      */
     @Query(value = "SELECT * FROM lifecycle_message_review_queue "
             + "WHERE status = 'DEFERRED' AND deferred_until < :threshold "
@@ -76,8 +93,7 @@ public interface LifecycleMessageReviewQueueRepository
 
     /**
      * LifecycleSendGatePoller step D (NS-BE-4b): claims up to {@code limit} AWAITING_VETO_WINDOW
-     * rows whose veto window has expired — backlog/RED safety net (design §7, ADR-10). SKIP
-     * LOCKED — see {@link #claimDraftedBatch(int)}.
+     * rows whose veto window has expired.
      */
     @Query(value = "SELECT * FROM lifecycle_message_review_queue "
             + "WHERE status = 'AWAITING_VETO_WINDOW' AND veto_window_expires_at < :threshold "

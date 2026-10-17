@@ -1,0 +1,17 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [development]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    uses: Teclavya/teclavya/.github/workflows/reusable-backend-pr-validation.yml@development
+    with:
+      service_name: notification-service
+    secrets: inherit

@@ -64,3 +64,14 @@ resilience4j:
       contentSafetyVerifier:
         timeoutDuration: 4s
         cancelRunningFuture: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true

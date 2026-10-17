@@ -1,0 +1,16 @@
+name: Post-Merge Full Test Suite
+
+on:
+  push:
+    branches: [development]
+
+concurrency:
+  group: post-merge-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  full-suite:
+    uses: Teclavya/teclavya/.github/workflows/reusable-backend-post-merge.yml@development
+    with:
+      service_name: notification-service
+    secrets: inherit

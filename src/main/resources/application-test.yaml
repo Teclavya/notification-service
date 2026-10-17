@@ -27,3 +27,10 @@ application:
     max-email-per-day: 1
     quiet-hours-start: 22
     quiet-hours-end: 7
+
+management:
+  health:
+    redis:
+      enabled: false
+    mail:
+      enabled: false

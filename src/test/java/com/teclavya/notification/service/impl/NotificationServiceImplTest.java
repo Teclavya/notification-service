@@ -1,7 +1,10 @@
 package com.teclavya.notification.service.impl;
 
 import com.teclavya.notification.dto.request.InternalSendRequest;
+import com.teclavya.notification.dto.request.SendNotificationRequest;
+import com.teclavya.notification.dto.request.UpdatePreferencesRequest;
 import com.teclavya.notification.dto.response.NotificationDto;
+import com.teclavya.notification.dto.response.NotificationPreferenceDto;
 import com.teclavya.notification.entities.*;
 import com.teclavya.notification.publisher.NotificationPublisher;
 import com.teclavya.notification.repo.NotificationPreferenceRepository;
@@ -38,6 +41,8 @@ class NotificationServiceImplTest {
     void setUp() {
         service = new NotificationServiceImpl(
                 notificationRepository, preferenceRepository, notificationPublisher);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maxEmailPerDay", 1);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maxPushPerDay", 3);
     }
 
     private Notification savedNotification() {
@@ -173,5 +178,171 @@ class NotificationServiceImplTest {
         assertThat(result.getActionUrl()).isEqualTo("/mentor/1");
         verify(notificationRepository, times(1)).save(any());
         verify(notificationPublisher, times(1)).publishToWebSocket(any(), eq("student-123"));
+    }
+
+    @Test
+    @DisplayName("sendNotification - sends inApp, email, and push when enabled and within limits")
+    void sendNotification_allChannelsEnabled() {
+        when(notificationRepository.save(any())).thenReturn(savedNotification());
+        when(notificationRepository.countByStudentIdAndChannelAndCreatedAtAfter(any(), eq(NotificationChannel.EMAIL), any()))
+                .thenReturn(0L);
+        when(notificationRepository.countByStudentIdAndChannelAndCreatedAtAfter(any(), eq(NotificationChannel.PUSH), any()))
+                .thenReturn(0L);
+
+        NotificationPreference pref = NotificationPreference.builder()
+                .studentId("student-123")
+                .notificationType(NotificationType.MENTOR_REPLIED)
+                .inAppEnabled(true)
+                .emailEnabled(true)
+                .pushEnabled(true)
+                .build();
+        when(preferenceRepository.findByStudentIdAndNotificationType("student-123", NotificationType.MENTOR_REPLIED))
+                .thenReturn(java.util.Optional.of(pref));
+
+        SendNotificationRequest request = new SendNotificationRequest();
+        request.setStudentId("student-123");
+        request.setNotificationType("MENTOR_REPLIED");
+        request.setTitle("Test Title");
+        request.setBody("Test Body");
+        request.setActionUrl("/test");
+
+        service.sendNotification(request);
+
+        // Saved 3 times: IN_APP, EMAIL, PUSH
+        verify(notificationRepository, times(3)).save(any());
+        verify(notificationPublisher, times(1)).publishToWebSocket(any(), eq("student-123"));
+    }
+
+    @Test
+    @DisplayName("sendNotification - respects daily limits for email and push")
+    void sendNotification_respectsDailyLimits() {
+        when(notificationRepository.save(any())).thenReturn(savedNotification());
+        when(notificationRepository.countByStudentIdAndChannelAndCreatedAtAfter(any(), eq(NotificationChannel.EMAIL), any()))
+                .thenReturn(5L);
+        when(notificationRepository.countByStudentIdAndChannelAndCreatedAtAfter(any(), eq(NotificationChannel.PUSH), any()))
+                .thenReturn(10L);
+
+        NotificationPreference pref = NotificationPreference.builder()
+                .studentId("student-123")
+                .notificationType(NotificationType.MENTOR_REPLIED)
+                .inAppEnabled(true)
+                .emailEnabled(true)
+                .pushEnabled(true)
+                .build();
+        when(preferenceRepository.findByStudentIdAndNotificationType("student-123", NotificationType.MENTOR_REPLIED))
+                .thenReturn(java.util.Optional.of(pref));
+
+        SendNotificationRequest request = new SendNotificationRequest();
+        request.setStudentId("student-123");
+        request.setNotificationType("MENTOR_REPLIED");
+        request.setTitle("Test Title");
+        request.setBody("Test Body");
+
+        service.sendNotification(request);
+
+        // Only IN_APP saved because email and push quotas exceeded
+        verify(notificationRepository, times(1)).save(any());
+    }
+
+    @Test
+    @DisplayName("getUnreadNotifications - returns mapped DTOs")
+    void getUnreadNotifications_returnsMappedDtos() {
+        Notification n = savedNotification();
+        when(notificationRepository.findByStudentIdAndIsReadFalseOrderByCreatedAtDesc("student-123"))
+                .thenReturn(List.of(n));
+
+        List<NotificationDto> result = service.getUnreadNotifications("student-123");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getTitle()).isEqualTo(n.getTitle());
+    }
+
+    @Test
+    @DisplayName("getAllNotifications - returns mapped DTOs with limit")
+    void getAllNotifications_returnsMappedDtos() {
+        Notification n = savedNotification();
+        when(notificationRepository.findByStudentIdOrderByCreatedAtDesc(eq("student-123"), any()))
+                .thenReturn(List.of(n));
+
+        List<NotificationDto> result = service.getAllNotifications("student-123", 10);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getTitle()).isEqualTo(n.getTitle());
+    }
+
+    @Test
+    @DisplayName("markAllAsRead - marks all unread notifications as read")
+    void markAllAsRead_marksAllAsRead() {
+        Notification n = savedNotification();
+        when(notificationRepository.findByStudentIdAndIsReadFalseOrderByCreatedAtDesc("student-123"))
+                .thenReturn(List.of(n));
+
+        service.markAllAsRead("student-123");
+
+        assertThat(n.isRead()).isTrue();
+        verify(notificationRepository).save(n);
+    }
+
+    @Test
+    @DisplayName("markAsRead - non-existent notification does not throw")
+    void markAsRead_nonExistentNotification() {
+        UUID id = UUID.randomUUID();
+        when(notificationRepository.findById(id)).thenReturn(java.util.Optional.empty());
+
+        service.markAsRead(id.toString());
+
+        verify(notificationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("getPreferences - returns mapped DTOs")
+    void getPreferences_returnsMappedDtos() {
+        NotificationPreference pref = NotificationPreference.builder()
+                .studentId("student-123")
+                .notificationType(NotificationType.GENERAL)
+                .inAppEnabled(true)
+                .emailEnabled(false)
+                .pushEnabled(true)
+                .quietHoursStart(22)
+                .quietHoursEnd(8)
+                .build();
+        when(preferenceRepository.findByStudentId("student-123")).thenReturn(List.of(pref));
+
+        List<NotificationPreferenceDto> prefs = service.getPreferences("student-123");
+
+        assertThat(prefs).hasSize(1);
+        assertThat(prefs.get(0).getNotificationType()).isEqualTo("GENERAL");
+        assertThat(prefs.get(0).isInAppEnabled()).isTrue();
+        assertThat(prefs.get(0).isEmailEnabled()).isFalse();
+    }
+
+    @Test
+    @DisplayName("updatePreference - updates existing and handles nulls")
+    void updatePreference_updatesExistingPreference() {
+        NotificationPreference existing = NotificationPreference.builder()
+                .studentId("student-123")
+                .notificationType(NotificationType.GENERAL)
+                .inAppEnabled(false)
+                .emailEnabled(false)
+                .build();
+        when(preferenceRepository.findByStudentIdAndNotificationType("student-123", NotificationType.GENERAL))
+                .thenReturn(java.util.Optional.of(existing));
+
+        UpdatePreferencesRequest request = new UpdatePreferencesRequest();
+        request.setNotificationType("GENERAL");
+        request.setInAppEnabled(true);
+        request.setEmailEnabled(true);
+        request.setPushEnabled(false);
+        request.setQuietHoursStart(23);
+        request.setQuietHoursEnd(7);
+
+        service.updatePreference("student-123", request);
+
+        assertThat(existing.isInAppEnabled()).isTrue();
+        assertThat(existing.isEmailEnabled()).isTrue();
+        assertThat(existing.isPushEnabled()).isFalse();
+        assertThat(existing.getQuietHoursStart()).isEqualTo(23);
+        assertThat(existing.getQuietHoursEnd()).isEqualTo(7);
+        verify(preferenceRepository).save(existing);
     }
 }

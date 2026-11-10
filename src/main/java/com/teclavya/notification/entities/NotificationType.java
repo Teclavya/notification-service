@@ -23,6 +23,8 @@ public enum NotificationType {
     AI_RESPONSE_DONE,
     COHORT_POST_CREATED,
     COHORT_POST_REPLY,
+    COHORT_INVITATION,
+    COHORT_MENTION,
     SESSION_BOOKED,
     SESSION_REMINDER,
 
@@ -44,5 +46,20 @@ public enum NotificationType {
     MILESTONE_DUE_SOON,
     MILESTONE_OVERDUE,
     JOURNEY_IDLE,
-    JOURNEY_WEEKLY_SUMMARY
+    JOURNEY_WEEKLY_SUMMARY;
+
+    public static java.util.Set<NotificationType> getTypesForCategory(String category) {
+        if (category == null || category.isBlank()) {
+            return java.util.Collections.emptySet();
+        }
+        if ("COHORT".equalsIgnoreCase(category) || "COMMUNITY".equalsIgnoreCase(category)) {
+            return java.util.Set.of(
+                COHORT_POST_CREATED,
+                COHORT_POST_REPLY,
+                COHORT_INVITATION,
+                COHORT_MENTION
+            );
+        }
+        return java.util.Collections.emptySet();
+    }
 }

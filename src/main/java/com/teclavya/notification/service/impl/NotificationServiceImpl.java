@@ -105,7 +105,17 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public List<NotificationDto> getUnreadNotifications(String studentId) {
-        return notificationRepository.findByStudentIdAndIsReadFalseOrderByCreatedAtDesc(studentId)
+        return getUnreadNotifications(studentId, null);
+    }
+
+    @Override
+    public List<NotificationDto> getUnreadNotifications(String studentId, String category) {
+        java.util.Set<NotificationType> types = NotificationType.getTypesForCategory(category);
+        if (types.isEmpty()) {
+            return notificationRepository.findByStudentIdAndIsReadFalseOrderByCreatedAtDesc(studentId)
+                    .stream().map(this::mapToDto).toList();
+        }
+        return notificationRepository.findByStudentIdAndIsReadFalseAndNotificationTypeInOrderByCreatedAtDesc(studentId, types)
                 .stream().map(this::mapToDto).toList();
     }
 
@@ -135,7 +145,16 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public long getUnreadCount(String studentId) {
-        return notificationRepository.countByStudentIdAndIsReadFalse(studentId);
+        return getUnreadCount(studentId, null);
+    }
+
+    @Override
+    public long getUnreadCount(String studentId, String category) {
+        java.util.Set<NotificationType> types = NotificationType.getTypesForCategory(category);
+        if (types.isEmpty()) {
+            return notificationRepository.countByStudentIdAndIsReadFalse(studentId);
+        }
+        return notificationRepository.countByStudentIdAndIsReadFalseAndNotificationTypeIn(studentId, types);
     }
 
     @Override

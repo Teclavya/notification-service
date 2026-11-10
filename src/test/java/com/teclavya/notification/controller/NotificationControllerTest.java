@@ -71,7 +71,7 @@ class NotificationControllerTest {
     @Test
     @DisplayName("GET /unread-count - should return count")
     void shouldReturnUnreadCount() throws Exception {
-        when(notificationService.getUnreadCount("student-123")).thenReturn(5L);
+        when(notificationService.getUnreadCount("student-123", null)).thenReturn(5L);
 
         mockMvc.perform(get("/api/v1/notifications/student-123/unread-count"))
                 .andExpect(status().isOk())
@@ -79,12 +79,35 @@ class NotificationControllerTest {
     }
 
     @Test
+    @DisplayName("GET /unread-count?category=COHORT - should return category filtered count")
+    void shouldReturnCategoryFilteredUnreadCount() throws Exception {
+        when(notificationService.getUnreadCount("student-123", "COHORT")).thenReturn(2L);
+
+        mockMvc.perform(get("/api/v1/notifications/student-123/unread-count?category=COHORT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(2))
+                .andExpect(jsonPath("$.category").value("COHORT"));
+    }
+
+    @Test
     @DisplayName("GET /unread - should return list")
     void shouldReturnUnreadNotifications() throws Exception {
-        when(notificationService.getUnreadNotifications("student-123"))
+        when(notificationService.getUnreadNotifications("student-123", null))
                 .thenReturn(List.of(sampleDto()));
 
         mockMvc.perform(get("/api/v1/notifications/student-123/unread"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].actionUrl").value("/mentor/chat/1"));
+    }
+
+    @Test
+    @DisplayName("GET /unread?category=COHORT - should return category filtered list")
+    void shouldReturnCategoryFilteredUnreadNotifications() throws Exception {
+        when(notificationService.getUnreadNotifications("student-123", "COHORT"))
+                .thenReturn(List.of(sampleDto()));
+
+        mockMvc.perform(get("/api/v1/notifications/student-123/unread?category=COHORT"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].actionUrl").value("/mentor/chat/1"));

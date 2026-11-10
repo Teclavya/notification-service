@@ -135,13 +135,20 @@ public class NotificationController {
     }
 
     @GetMapping("/{studentId}/unread")
-    public ResponseEntity<List<NotificationDto>> getUnread(@PathVariable String studentId) {
-        return ResponseEntity.ok(notificationService.getUnreadNotifications(studentId));
+    public ResponseEntity<List<NotificationDto>> getUnread(
+            @PathVariable String studentId,
+            @RequestParam(required = false) String category) {
+        return ResponseEntity.ok(notificationService.getUnreadNotifications(studentId, category));
     }
 
     @GetMapping("/{studentId}/unread-count")
-    public ResponseEntity<Map<String, Long>> getUnreadCount(@PathVariable String studentId) {
-        long count = notificationService.getUnreadCount(studentId);
+    public ResponseEntity<Map<String, Object>> getUnreadCount(
+            @PathVariable String studentId,
+            @RequestParam(required = false) String category) {
+        long count = notificationService.getUnreadCount(studentId, category);
+        if (StringUtils.hasText(category)) {
+            return ResponseEntity.ok(Map.of("count", count, "category", category));
+        }
         return ResponseEntity.ok(Map.of("count", count));
     }
 

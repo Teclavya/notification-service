@@ -18,5 +18,9 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 
     long countByStudentIdAndIsReadFalse(String studentId);
 
+    long countByStudentIdAndIsReadFalseAndNotificationTypeIn(String studentId, java.util.Collection<com.teclavya.notification.entities.NotificationType> types);
+
+    List<Notification> findByStudentIdAndIsReadFalseAndNotificationTypeInOrderByCreatedAtDesc(String studentId, java.util.Collection<com.teclavya.notification.entities.NotificationType> types);
+
     int deleteByExpiresAtBefore(LocalDateTime before);
 }

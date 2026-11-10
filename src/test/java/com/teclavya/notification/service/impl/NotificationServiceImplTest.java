@@ -107,6 +107,33 @@ class NotificationServiceImplTest {
     }
 
     @Test
+    @DisplayName("getUnreadCount with category - should filter by category notification types")
+    void shouldReturnCategoryFilteredUnreadCount() {
+        java.util.Set<NotificationType> cohortTypes = NotificationType.getTypesForCategory("COHORT");
+        when(notificationRepository.countByStudentIdAndIsReadFalseAndNotificationTypeIn("student-123", cohortTypes))
+                .thenReturn(2L);
+
+        long count = service.getUnreadCount("student-123", "COHORT");
+
+        assertThat(count).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("getUnreadNotifications with category - should return filtered list")
+    void shouldReturnCategoryFilteredUnreadNotifications() {
+        Notification n = savedNotification();
+        n.setNotificationType(NotificationType.COHORT_POST_REPLY);
+        java.util.Set<NotificationType> cohortTypes = NotificationType.getTypesForCategory("COHORT");
+        when(notificationRepository.findByStudentIdAndIsReadFalseAndNotificationTypeInOrderByCreatedAtDesc("student-123", cohortTypes))
+                .thenReturn(List.of(n));
+
+        List<NotificationDto> result = service.getUnreadNotifications("student-123", "COHORT");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getNotificationType()).isEqualTo("COHORT_POST_REPLY");
+    }
+
+    @Test
     @DisplayName("deleteNotification - should call repository delete")
     void shouldDeleteNotification() {
         String id = UUID.randomUUID().toString();

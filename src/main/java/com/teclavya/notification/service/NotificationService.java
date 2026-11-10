@@ -24,10 +24,12 @@ public interface NotificationService {
                              Map<String, Object> metadata, String actionUrl);
     List<NotificationDto> sendNotificationBatch(List<InternalSendRequest> requests);
     List<NotificationDto> getUnreadNotifications(String studentId);
+    List<NotificationDto> getUnreadNotifications(String studentId, String category);
     List<NotificationDto> getAllNotifications(String studentId, int limit);
     void markAsRead(String notificationId);
     void markAllAsRead(String studentId);
     long getUnreadCount(String studentId);
+    long getUnreadCount(String studentId, String category);
     void deleteNotification(String notificationId);
     List<NotificationPreferenceDto> getPreferences(String studentId);
     void updatePreference(String studentId, UpdatePreferencesRequest request);

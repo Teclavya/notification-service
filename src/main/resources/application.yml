@@ -3,6 +3,22 @@ spring:
     name: notification-service
   profiles:
     active: ${APP_PROFILE:dev}
+  # RabbitMQ event bus for SLA monitoring and lifecycle events
+  rabbitmq:
+    enabled: ${RABBITMQ_ENABLED:true}
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:guest}
+    password: ${SPRING_RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000ms
+          multiplier: 2.0
+          max-interval: 10000ms
   # SMTP config — all values from env; absent in dev (log-only mode)
   mail:
     host: ${SPRING_MAIL_HOST:}
@@ -47,6 +63,12 @@ feature:
 notification:
   webhook:
     secret: ${NOTIFICATION_WEBHOOK_SECRET:dev-webhook-secret}
+  oncall:
+    enabled: ${NOTIFICATION_ONCALL_ENABLED:true}
+    slack-webhook-url: ${NOTIFICATION_ONCALL_SLACK_WEBHOOK_URL:}
+    discord-webhook-url: ${NOTIFICATION_ONCALL_DISCORD_WEBHOOK_URL:}
+    admin-alert-email: ${NOTIFICATION_ONCALL_ADMIN_ALERT_EMAIL:oncall-alerts@teclavya.com}
+    email-alerts-enabled: ${NOTIFICATION_ONCALL_EMAIL_ALERTS_ENABLED:true}
 
 # Resilience4j — content-safety verifier circuit-breaker + time-limiter (BE-3)
 resilience4j:

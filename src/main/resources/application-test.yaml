@@ -15,6 +15,12 @@ spring:
         dialect: org.hibernate.dialect.H2Dialect
   flyway:
     enabled: false
+  rabbitmq:
+    enabled: false
+    dynamic: false
+    listener:
+      simple:
+        auto-startup: false
 application:
   cors: http://localhost:3000
   jwt:
@@ -33,4 +39,6 @@ management:
     redis:
       enabled: false
     mail:
+      enabled: false
+    rabbit:
       enabled: false

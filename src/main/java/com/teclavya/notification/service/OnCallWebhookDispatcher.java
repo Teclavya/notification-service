@@ -41,7 +41,7 @@ public class OnCallWebhookDispatcher {
     public boolean dispatchSlack(TicketLifecycleEventData data, String eventType) {
         if (!onCallProperties.isEnabled() || onCallProperties.getSlackWebhookUrl() == null || onCallProperties.getSlackWebhookUrl().isBlank()) {
             log.debug("Slack on-call dispatch skipped (disabled or no webhook URL configured)");
-            recordAudit(data.getTicketNumber(), eventType, "SLACK", onCallProperties.getSlackWebhookUrl(), "SKIPPED", "No webhook URL configured or channel disabled");
+            recordAudit(data.getTicketNumber(), eventType, "SLACK", maskUrl(onCallProperties.getSlackWebhookUrl()), "SKIPPED", "No webhook URL configured or channel disabled");
             return false;
         }
 
@@ -69,7 +69,7 @@ public class OnCallWebhookDispatcher {
     public boolean dispatchDiscord(TicketLifecycleEventData data, String eventType) {
         if (!onCallProperties.isEnabled() || onCallProperties.getDiscordWebhookUrl() == null || onCallProperties.getDiscordWebhookUrl().isBlank()) {
             log.debug("Discord on-call dispatch skipped (disabled or no webhook URL configured)");
-            recordAudit(data.getTicketNumber(), eventType, "DISCORD", onCallProperties.getDiscordWebhookUrl(), "SKIPPED", "No webhook URL configured or channel disabled");
+            recordAudit(data.getTicketNumber(), eventType, "DISCORD", maskUrl(onCallProperties.getDiscordWebhookUrl()), "SKIPPED", "No webhook URL configured or channel disabled");
             return false;
         }
 

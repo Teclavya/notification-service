@@ -17,4 +17,11 @@ public interface EmailService {
      *         (only thrown when JavaMailSender IS configured; callers convert to 500)
      */
     void sendEmail(String to, String subject, String htmlBody);
+
+    /**
+     * Send an HTML email with an optional Reply-To header.
+     */
+    default void sendEmail(String to, String subject, String htmlBody, String replyTo) {
+        sendEmail(to, subject, htmlBody);
+    }
 }

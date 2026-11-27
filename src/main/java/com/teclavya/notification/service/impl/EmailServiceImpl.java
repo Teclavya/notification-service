@@ -35,19 +35,24 @@ public class EmailServiceImpl implements EmailService {
 
     public EmailServiceImpl(
             Optional<JavaMailSender> mailSender,
-            @Value("${spring.mail.username:noreply@teclavya.com}") String fromAddress,
+            @Value("${spring.mail.username:no-reply@teclavya.com}") String fromAddress,
             @Value("${notification.email.force-log-only:false}") boolean forceLogOnly,
             Environment environment) {
         this.mailSender = mailSender;
         this.forceLogOnly = forceLogOnly || Arrays.asList(environment.getActiveProfiles()).contains("dev");
         // Guard: if the configured value is blank (username not set), fall back to a safe default
         this.fromAddress = (fromAddress == null || fromAddress.isBlank())
-                ? "noreply@teclavya.com"
+                ? "no-reply@teclavya.com"
                 : fromAddress;
     }
 
     @Override
     public void sendEmail(String to, String subject, String htmlBody) {
+        sendEmail(to, subject, htmlBody, null);
+    }
+
+    @Override
+    public void sendEmail(String to, String subject, String htmlBody, String replyTo) {
         if (forceLogOnly || mailSender.isEmpty()) {
             log.warn("[EMAIL LOG-ONLY] to='{}' subject='{}' — JavaMailSender not configured; "
                     + "set spring.mail.host to enable outbound dispatch", to, subject);
@@ -60,7 +65,10 @@ public class EmailServiceImpl implements EmailService {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(fromAddress);
             helper.setTo(to);
-            helper.setSubject(subject);
+            helper.setSubject(subject != null ? subject.replaceAll("[\\r\\n]+", " ") : "");
+            if (replyTo != null && !replyTo.isBlank()) {
+                helper.setReplyTo(replyTo.replaceAll("[\\r\\n]+", "").trim());
+            }
             helper.setText(htmlBody, true);
             sender.send(message);
             log.info("Email sent to '{}' with subject '{}'", to, subject);

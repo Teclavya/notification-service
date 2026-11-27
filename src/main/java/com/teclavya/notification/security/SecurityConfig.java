@@ -24,6 +24,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers("/api/v1/notifications/internal/**").permitAll()
+                .requestMatchers("/api/v1/notifications/public/**").permitAll()
                 .requestMatchers("/api/v1/notifications/email").permitAll() // internal token auth handled in controller
                 .requestMatchers("/ws/**", "/sockjs/**").permitAll() // WebSocket & SockJS info handshake
                 .anyRequest().authenticated()
